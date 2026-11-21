@@ -188,7 +188,7 @@ class MainActivity : ComponentActivity() {
                                     onDismissEnrollDialog = { pendingCardToEnroll = null },
                                     onSaveAndEnrollTap = { cardUid, existingId, reg, name, uniId, uniName, dept, crsCode, crsName, customVals ->
                                         val res = storage.enrollAndRecordTap(
-                                            sessionId = session.id,
+                                            session = session,
                                             cardUid = cardUid,
                                             weekNumber = if (session.isMultiSession()) activeWeek else null,
                                             existingStudentIdToLink = existingId,
