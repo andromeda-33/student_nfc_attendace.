@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">TapAttend NFC</string>
+    <string name="scan_instruction">Hold NFC card to back of phone</string>
+    <string name="single_session_exam">Exam / Test Attendance</string>
+    <string name="single_session_submission">Assignment / Lab Submission</string>
+    <string name="semester_session">Semester Weekly Attendance</string>
+</resources>
+

@@ -1,0 +1,227 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isEmailVerified() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'steve.mould27@gmail.com'
+      );
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll([
+        'id', 'cardUid', 'regNumber', 'fullName',
+        'universityId', 'universityName', 'department',
+        'courseCode', 'courseName', 'createdByUid', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'cardUid', 'regNumber', 'fullName',
+        'universityId', 'universityName', 'department',
+        'courseCode', 'courseName', 'createdByUid', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.id)
+      && data.cardUid is string && data.cardUid.size() >= 4 && data.cardUid.size() <= 32 && data.cardUid.matches('^[A-Z0-9]+$')
+      && data.regNumber is string && data.regNumber.size() >= 2 && data.regNumber.size() <= 40
+      && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100
+      && data.universityId is string && data.universityId.size() >= 1 && data.universityId.size() <= 64
+      && data.universityName is string && data.universityName.size() >= 2 && data.universityName.size() <= 140
+      && data.department is string && data.department.size() >= 2 && data.department.size() <= 120
+      && data.courseCode is string && data.courseCode.size() >= 1 && data.courseCode.size() <= 32
+      && data.courseName is string && data.courseName.size() >= 2 && data.courseName.size() <= 140
+      && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidCustomCourse(data) {
+      return data.keys().hasAll([
+        'id', 'universityId', 'department', 'courseCode', 'courseName', 'createdByUid', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'universityId', 'department', 'courseCode', 'courseName', 'createdByUid', 'createdAt'
+      ])
+      && isValidId(data.id)
+      && data.universityId is string && data.universityId.size() >= 1 && data.universityId.size() <= 64
+      && data.department is string && data.department.size() >= 2 && data.department.size() <= 120
+      && data.courseCode is string && data.courseCode.size() >= 2 && data.courseCode.size() <= 32
+      && data.courseName is string && data.courseName.size() >= 2 && data.courseName.size() <= 140
+      && data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128
+      && data.createdAt is timestamp;
+    }
+
+    function isValidSession(data) {
+      return data.keys().hasAll([
+        'id', 'title', 'courseCode', 'universityId', 'universityName',
+        'department', 'allowedCourses', 'sessionType', 'totalWeeks',
+        'venue', 'instructorName', 'ownerUid', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'title', 'courseCode', 'universityId', 'universityName',
+        'department', 'allowedCourses', 'sessionType', 'totalWeeks',
+        'venue', 'instructorName', 'customColumns', 'sessionColumnNames',
+        'ownerUid', 'createdAt'
+      ])
+      && isValidId(data.id)
+      && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+      && data.courseCode is string && data.courseCode.size() >= 1 && data.courseCode.size() <= 32
+      && data.universityId is string && data.universityId.size() >= 1 && data.universityId.size() <= 64
+      && data.universityName is string && data.universityName.size() >= 2 && data.universityName.size() <= 140
+      && data.department is string && data.department.size() >= 2 && data.department.size() <= 120
+      && data.allowedCourses is list && data.allowedCourses.size() >= 1 && data.allowedCourses.size() <= 15 && data.allowedCourses[0] is string
+      && data.sessionType in ['SEMESTER_WEEKLY', 'EXAM', 'SUBMISSION', 'SINGLE_EVENT', 'CUSTOM_SHEET']
+      && data.totalWeeks is int && data.totalWeeks >= 1 && data.totalWeeks <= 20
+      && data.venue is string && data.venue.size() >= 1 && data.venue.size() <= 100
+      && data.instructorName is string && data.instructorName.size() >= 1 && data.instructorName.size() <= 100
+      && (!('customColumns' in data) || (data.customColumns is list && data.customColumns.size() <= 10 && (data.customColumns.size() == 0 || data.customColumns[0] is string)))
+      && (!('sessionColumnNames' in data) || (data.sessionColumnNames is list && data.sessionColumnNames.size() <= 20 && (data.sessionColumnNames.size() == 0 || data.sessionColumnNames[0] is string)))
+      && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
+      && data.createdAt is timestamp;
+    }
+
+    function isValidRecord(data, sessionId) {
+      return data.keys().hasAll([
+        'id', 'sessionId', 'studentCardUid', 'regNumber', 'studentName',
+        'studentCourse', 'studentDepartment', 'timestamp', 'status',
+        'orderNumber', 'attestationToken', 'recordedByUid', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'sessionId', 'studentCardUid', 'regNumber', 'studentName',
+        'studentCourse', 'studentDepartment', 'weekNumber', 'timestamp', 'status',
+        'orderNumber', 'attestationToken', 'customValues', 'recordedByUid', 'createdAt'
+      ])
+      && isValidId(data.id)
+      && data.sessionId == sessionId
+      && data.studentCardUid is string && data.studentCardUid.size() >= 4 && data.studentCardUid.size() <= 32
+      && data.regNumber is string && data.regNumber.size() >= 2 && data.regNumber.size() <= 40
+      && data.studentName is string && data.studentName.size() >= 2 && data.studentName.size() <= 100
+      && data.studentCourse is string && data.studentCourse.size() >= 2 && data.studentCourse.size() <= 140
+      && data.studentDepartment is string && data.studentDepartment.size() >= 2 && data.studentDepartment.size() <= 120
+      && (!('weekNumber' in data) || data.weekNumber == null || (data.weekNumber is int && data.weekNumber >= 1 && data.weekNumber <= 20))
+      && data.timestamp is number
+      && data.status in ['PRESENT', 'LATE', 'EXCUSED']
+      && data.orderNumber is int && data.orderNumber >= 1
+      && data.attestationToken is string && data.attestationToken.size() >= 8 && data.attestationToken.size() <= 32
+      && (!('customValues' in data) || data.customValues is map)
+      && data.recordedByUid is string && data.recordedByUid.size() >= 1 && data.recordedByUid.size() <= 128
+      && data.createdAt is timestamp;
+    }
+
+    match /students/{studentId} {
+      allow get: if isEmailVerified() && isValidId(studentId);
+      allow list: if isEmailVerified() && resource.data.universityId is string && resource.data.universityId.size() > 0;
+      allow create: if isEmailVerified()
+        && isValidId(studentId)
+        && isValidStudent(incoming())
+        && incoming().id == studentId
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isEmailVerified()
+        && isValidId(studentId)
+        && isValidStudent(incoming())
+        && (existing().createdByUid == request.auth.uid || isAdmin())
+        && incoming().id == existing().id
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'cardUid', 'regNumber', 'fullName', 'universityId', 'universityName',
+          'department', 'courseCode', 'courseName', 'updatedAt'
+        ]);
+      allow delete: if isEmailVerified()
+        && isValidId(studentId)
+        && (existing().createdByUid == request.auth.uid || isAdmin());
+    }
+
+    match /customCourses/{courseId} {
+      allow get: if isEmailVerified() && isValidId(courseId);
+      allow list: if isEmailVerified() && resource.data.universityId is string && resource.data.universityId.size() > 0;
+      allow create: if isEmailVerified()
+        && isValidId(courseId)
+        && isValidCustomCourse(incoming())
+        && incoming().id == courseId
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow delete: if isEmailVerified()
+        && isValidId(courseId)
+        && (existing().createdByUid == request.auth.uid || isAdmin());
+    }
+
+    match /sessions/{sessionId} {
+      allow get: if isEmailVerified() && isValidId(sessionId)
+        && (existing().ownerUid == request.auth.uid || isAdmin());
+      allow list: if isEmailVerified()
+        && resource.data.ownerUid == request.auth.uid;
+      allow create: if isEmailVerified()
+        && isValidId(sessionId)
+        && isValidSession(incoming())
+        && incoming().id == sessionId
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isEmailVerified()
+        && isValidId(sessionId)
+        && isValidSession(incoming())
+        && (existing().ownerUid == request.auth.uid || isAdmin())
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'totalWeeks', 'venue', 'instructorName',
+          'allowedCourses', 'customColumns', 'sessionColumnNames'
+        ]);
+      allow delete: if isEmailVerified()
+        && isValidId(sessionId)
+        && (existing().ownerUid == request.auth.uid || isAdmin());
+
+      match /records/{recordId} {
+        allow get: if isEmailVerified() && isValidId(sessionId) && isValidId(recordId)
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerUid == request.auth.uid;
+        allow list: if isEmailVerified()
+          && resource.data.recordedByUid == request.auth.uid;
+        allow create: if isEmailVerified()
+          && isValidId(sessionId) && isValidId(recordId)
+          && isValidRecord(incoming(), sessionId)
+          && incoming().id == recordId
+          && incoming().recordedByUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/sessions/$(sessionId))
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerUid == request.auth.uid;
+        allow delete: if isEmailVerified()
+          && isValidId(sessionId) && isValidId(recordId)
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.ownerUid == request.auth.uid;
+      }
+    }
+
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && request.auth.uid == adminId;
+    }
+
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+  }
+}

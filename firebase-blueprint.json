@@ -1,0 +1,151 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Registered student NFC card mapped to university, department, and course",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "cardUid": { "type": "string", "minLength": 4, "maxLength": 32, "pattern": "^[A-Z0-9]+$" },
+        "regNumber": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "fullName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "universityId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "universityName": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "department": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "courseCode": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "courseName": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "createdByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "cardUid",
+        "regNumber",
+        "fullName",
+        "universityId",
+        "universityName",
+        "department",
+        "courseCode",
+        "courseName",
+        "createdByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CustomCourse": {
+      "title": "CustomCourse",
+      "description": "Custom university department course added by instructors or class reps",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "universityId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "department": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "courseCode": { "type": "string", "minLength": 2, "maxLength": 32 },
+        "courseName": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "createdByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "universityId",
+        "department",
+        "courseCode",
+        "courseName",
+        "createdByUid",
+        "createdAt"
+      ]
+    },
+    "AttendanceSession": {
+      "title": "AttendanceSession",
+      "description": "Attendance sheet configuration bound to university, department, and allowed course(s)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "courseCode": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "universityId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "universityName": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "department": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "allowedCourses": { "type": "array", "description": "Allowed course names for single or common-unit multi-course classes (max 15)" },
+        "sessionType": { "type": "string", "enum": ["SEMESTER_WEEKLY", "EXAM", "SUBMISSION", "SINGLE_EVENT", "CUSTOM_SHEET"] },
+        "totalWeeks": { "type": "integer" },
+        "venue": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "instructorName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "customColumns": { "type": "array" },
+        "sessionColumnNames": { "type": "array" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "title",
+        "courseCode",
+        "universityId",
+        "universityName",
+        "department",
+        "allowedCourses",
+        "sessionType",
+        "totalWeeks",
+        "venue",
+        "instructorName",
+        "ownerUid",
+        "createdAt"
+      ]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Individual NFC tap attendance attestation record under a session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "studentCardUid": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "regNumber": { "type": "string", "minLength": 2, "maxLength": 40 },
+        "studentName": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "studentCourse": { "type": "string", "minLength": 2, "maxLength": 140 },
+        "studentDepartment": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "weekNumber": { "type": "integer" },
+        "timestamp": { "type": "number" },
+        "status": { "type": "string", "enum": ["PRESENT", "LATE", "EXCUSED"] },
+        "orderNumber": { "type": "integer" },
+        "attestationToken": { "type": "string", "minLength": 8, "maxLength": 32 },
+        "recordedByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "sessionId",
+        "studentCardUid",
+        "regNumber",
+        "studentName",
+        "studentCourse",
+        "studentDepartment",
+        "timestamp",
+        "status",
+        "orderNumber",
+        "attestationToken",
+        "recordedByUid",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Shared university student NFC card directory"
+    },
+    "/customCourses/{courseId}": {
+      "schema": { "$ref": "#/entities/CustomCourse" },
+      "description": "User-added custom courses per university and department"
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/AttendanceSession" },
+      "description": "Lecturer/class-rep attendance sessions"
+    },
+    "/sessions/{sessionId}/records/{recordId}": {
+      "schema": { "$ref": "#/entities/AttendanceRecord" },
+      "description": "Verified attendance tap records scoped to a session"
+    }
+  }
+}

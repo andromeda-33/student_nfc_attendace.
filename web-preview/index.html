@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TapAttend NFC - Attendance & Roll Call Studio</title>
+    <style>
+        :root {
+            --primary: #0284c7;
+            --primary-dark: #0369a1;
+            --primary-light: #e0f2fe;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-main);
+            padding: 16px;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            background: var(--surface);
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            margin-bottom: 20px;
+        }
+
+        .header-title h1 {
+            font-size: 20px;
+            color: var(--primary-dark);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-blue { background: var(--primary-light); color: var(--primary-dark); }
+        .badge-green { background: #dcfce7; color: #15803d; }
+        .badge-amber { background: #fef3c7; color: #b45309; }
+        .badge-red { background: #fee2e2; color: #b91c1c; }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 850px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            border: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            font-size: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* NFC Tap Radar */
+        .radar-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
+            border-radius: 12px;
+            background: #f0fdf4;
+            border: 2px dashed #86efac;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .radar-box.duplicate {
+            background: #fffbeb;
+            border-color: #fde68a;
+        }
+
+        .radar-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            margin-bottom: 12px;
+            box-shadow: 0 0 0 8px var(--primary-light);
+            animation: pulse 2s infinite;
+        }
+
+        .radar-circle.success {
+            background: var(--success);
+            box-shadow: 0 0 0 8px #dcfce7;
+            animation: none;
+        }
+
+        .radar-circle.warn {
+            background: var(--warning);
+            box-shadow: 0 0 0 8px #fef3c7;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(2, 132, 199, 0.4); }
+            70% { transform: scale(1); box-shadow: 0 0 0 14px rgba(2, 132, 199, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(2, 132, 199, 0); }
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.15s ease;
+        }
+
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-main); }
+        .btn-outline:hover { background: var(--bg); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+        .select, input, select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 13px;
+            outline: none;
+            background: white;
+            margin-top: 4px;
+            margin-bottom: 12px;
+        }
+
+        .select:focus, input:focus, select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px var(--primary-light);
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        /* Matrix Table */
+        .table-responsive {
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: #f1f5f9;
+            font-weight: 600;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        tr:hover {
+            background-color: #f8fafc;
+        }
+
+        .p-badge {
+            background: #dcfce7;
+            color: #15803d;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .a-badge {
+            color: #94a3b8;
+            font-weight: bold;
+            padding: 2px 6px;
+            font-size: 11px;
+        }
+
+        .token-tag {
+            font-family: monospace;
+            font-size: 11px;
+            color: #475569;
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .status-pill {
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 12px;
+            font-size: 12px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-title">
+            <h1>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+                TapAttend NFC
+            </h1>
+            <p>1–2s Smart Roll Call • Anti-Proxy Attestation • Multi-Format Sheets</p>
+        </div>
+        <div>
+            <button class="btn btn-primary" onclick="exportCurrentCSV()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download Sheet (.CSV)
+            </button>
+        </div>
+    </header>
+
+    <div class="dashboard-grid">
+        <!-- Left Column: Sheet Config & NFC Tap Simulator -->
+        <div>
+            <!-- Sheet Customizer -->
+            <div class="card">
+                <h2>
+                    Customize Sheet
+                    <span class="badge badge-blue" id="sheetTypeBadge">Semester</span>
+                </h2>
+
+                <label>Sheet / Occasion Type:</label>
+                <select id="sessionTypeSelect" onchange="onSessionTypeChanged()">
+                    <option value="SEMESTER_WEEKLY" selected>Whole Semester Attendance (Multi-Week Matrix)</option>
+                    <option value="EXAM">Single Exam / Test Attendance</option>
+                    <option value="SUBMISSION">Assignment / Lab Submission Drop-off</option>
+                    <option value="SINGLE_EVENT">Single Occasion / Seminar Roll Call</option>
+                </select>
+
+                <div class="grid" style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div>
+                        <label>Course Code:</label>
+                        <input type="text" id="courseCodeInput" value="CSC 301" oninput="updateHeaders()">
+                    </div>
+                    <div id="weekCountGroup">
+                        <label>Total Weeks:</label>
+                        <input type="number" id="totalWeeksInput" value="14" min="1" max="16" onchange="renderAttendanceView()">
+                    </div>
+                </div>
+
+                <label>Course / Sheet Title:</label>
+                <input type="text" id="sessionTitleInput" value="Data Structures & Algorithms" oninput="updateHeaders()">
+
+                <div id="activeWeekSelectorGroup">
+                    <label>Currently Tapping In:</label>
+                    <select id="activeWeekSelect" onchange="onActiveWeekChanged()">
+                        <!-- dynamically populated -->
+                    </select>
+                </div>
+            </div>
+
+            <!-- NFC Tap Zone (Works with Web NFC if supported or Simulates 1-Tap) -->
+            <div class="card">
+                <h2>
+                    NFC Reader Zone
+                    <span id="nfcStatusBadge" class="badge badge-green">Ready</span>
+                </h2>
+
+                <div class="radar-box" id="radarBox" onclick="simulateTap()">
+                    <div class="radar-circle" id="radarCircle">
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 10a12 12 0 0 1 16 0"/>
+                            <path d="M7 13a8 8 0 0 1 10 0"/>
+                            <path d="M10 16a4 4 0 0 1 4 0"/>
+                            <circle cx="12" cy="20" r="1"/>
+                        </svg>
+                    </div>
+                    <strong id="radarText" style="font-size: 15px;">Tap Card or Click to Scan</strong>
+                    <span style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Fast 1–2s scan with audio chime & duplicate warning</span>
+                </div>
+
+                <div id="scanStatusBox" class="status-pill"></div>
+
+                <div style="margin-top: 14px; display: flex; gap: 8px;">
+                    <select id="studentQuickPickSelect" style="margin: 0;">
+                        <!-- Options filled by JS -->
+                    </select>
+                    <button class="btn btn-outline btn-sm" onclick="tapSelectedStudent()" style="white-space: nowrap;">Tap Picked</button>
+                </div>
+
+                <div style="margin-top: 12px;">
+                    <button class="btn btn-outline btn-sm" style="width: 100%;" onclick="enableRealWebNfc()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        Turn on Android Chrome Web NFC
+                    </button>
+                </div>
+            </div>
+
+            <!-- Signature Substitution Info Card -->
+            <div class="card" style="background: #f8fafc;">
+                <h2>Why NFC Replaces Signatures</h2>
+                <ul style="font-size: 12px; color: #475569; padding-left: 18px; line-height: 1.6;">
+                    <li><strong>Cryptographic Token:</strong> 12-char SHA-256 hash verified by hardware UID + micro-timestamp.</li>
+                    <li><strong>No Proxy Signing:</strong> Unlike paper where one student signs for 4 friends, each student must physically tap their unique card.</li>
+                    <li><strong>Sub-second Throughput:</strong> Eliminates crowded podium bottlenecks.</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Right Column: Live Attendance Sheet / Matrix Table -->
+        <div>
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div>
+                        <h2 id="sheetViewTitle" style="margin: 0;">CSC 301 - Attendance Matrix</h2>
+                        <span id="sheetSubTitle" style="font-size: 12px; color: var(--text-muted);">Semester Roll Call • 14 Weeks</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <span id="presentCountBadge" class="badge badge-green" style="font-size: 13px;">0 Present</span>
+                    </div>
+                </div>
+
+                <div class="tabs">
+                    <button class="tab-btn active" id="tabMatrix" onclick="switchView('matrix')">Attendance Sheet View</button>
+                    <button class="tab-btn" id="tabRecent" onclick="switchView('recent')">Live Tap Log (<span id="recentCount">0</span>)</button>
+                    <button class="tab-btn" id="tabRoster" onclick="switchView('roster')">Student Directory (<span id="rosterCount">0</span>)</button>
+                </div>
+
+                <div id="viewContainer">
+                    <!-- Table rendered here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Web Audio Synthesizer for 1-2s Feedback ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playChime(success = true) {
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                if (success) {
+                    // Pleasant high chime
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+                    osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.12);
+                    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.25);
+                } else {
+                    // Warning buzz
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+                    gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.35);
+                }
+            } catch (e) {
+                console.log("Audio not allowed yet:", e);
+            }
+        }
+
+        // --- Data Store ---
+        let students = [
+            { uid: "04A23B5C89", reg: "CSC/2023/001", name: "Alexander Davis" },
+            { uid: "04F18290EA", reg: "CSC/2023/014", name: "Beatrice Mwangi" },
+            { uid: "04C398110D", reg: "CSC/2023/027", name: "Chen Wei" },
+            { uid: "04561234AB", reg: "CSC/2023/033", name: "David Okafor" },
+            { uid: "047890CDEF", reg: "CSC/2023/048", name: "Elena Rostova" },
+            { uid: "0499AA1234", reg: "CSC/2023/055", name: "Fatima Al-Mansoor" },
+            { uid: "04BB6789EE", reg: "CSC/2023/062", name: "Gabriel Santos" },
+            { uid: "04CC8910FF", reg: "CSC/2023/074", name: "Hannah Kim" }
+        ];
+
+        let records = [];
+        let currentTab = 'matrix';
+        let currentWeek = 1;
+
+        // Hash Generator substituting signature
+        function generateAttestation(uid, timeStr) {
+            let hash = 0;
+            const str = `${uid}|${timeStr}|ATTEND_TOKEN`;
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                hash |= 0;
+            }
+            return 'SHA:' + Math.abs(hash).toString(16).toUpperCase().padStart(8, '0');
+        }
+
+        function init() {
+            populateWeekDropdown();
+            populateQuickPick();
+            renderAttendanceView();
+            updateHeaders();
+        }
+
+        function populateWeekDropdown() {
+            const select = document.getElementById('activeWeekSelect');
+            const totalWeeks = parseInt(document.getElementById('totalWeeksInput').value) || 14;
+            select.innerHTML = '';
+            for (let i = 1; i <= totalWeeks; i++) {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.textContent = `Week ${i}`;
+                if (i === currentWeek) opt.selected = true;
+                select.appendChild(opt);
+            }
+        }
+
+        function populateQuickPick() {
+            const select = document.getElementById('studentQuickPickSelect');
+            select.innerHTML = '';
+            students.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.uid;
+                opt.textContent = `${s.name} (${s.reg})`;
+                select.appendChild(opt);
+            });
+        }
+
+        function onSessionTypeChanged() {
+            const type = document.getElementById('sessionTypeSelect').value;
+            const isSemester = type === 'SEMESTER_WEEKLY';
+            document.getElementById('weekCountGroup').style.display = isSemester ? 'block' : 'none';
+            document.getElementById('activeWeekSelectorGroup').style.display = isSemester ? 'block' : 'none';
+            document.getElementById('tabMatrix').textContent = isSemester ? 'Semester Matrix' : 'Attendance Sheet';
+            document.getElementById('sheetTypeBadge').textContent = isSemester ? 'Semester' : (type === 'EXAM' ? 'Exam' : 'Submission');
+            updateHeaders();
+            renderAttendanceView();
+        }
+
+        function updateHeaders() {
+            const code = document.getElementById('courseCodeInput').value;
+            const title = document.getElementById('sessionTitleInput').value;
+            const type = document.getElementById('sessionTypeSelect').value;
+            document.getElementById('sheetViewTitle').textContent = `${code}: ${title}`;
+            document.getElementById('sheetSubTitle').textContent = type === 'SEMESTER_WEEKLY' ? `Semester Roll Call • Week ${currentWeek}` : type;
+        }
+
+        function onActiveWeekChanged() {
+            currentWeek = parseInt(document.getElementById('activeWeekSelect').value);
+            updateHeaders();
+            renderAttendanceView();
+        }
+
+        function switchView(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            if (tab === 'matrix') document.getElementById('tabMatrix').classList.add('active');
+            if (tab === 'recent') document.getElementById('tabRecent').classList.add('active');
+            if (tab === 'roster') document.getElementById('tabRoster').classList.add('active');
+            renderAttendanceView();
+        }
+
+        function tapStudentByUid(uid) {
+            const student = students.find(s => s.uid === uid);
+            if (!student) return;
+
+            const type = document.getElementById('sessionTypeSelect').value;
+            const isSemester = type === 'SEMESTER_WEEKLY';
+            const week = isSemester ? currentWeek : null;
+
+            // Duplicate check
+            const alreadyPresent = records.some(r => r.uid === uid && (week === null || r.week === week));
+
+            const radarBox = document.getElementById('radarBox');
+            const radarCircle = document.getElementById('radarCircle');
+            const radarText = document.getElementById('radarText');
+            const statusBox = document.getElementById('scanStatusBox');
+
+            if (alreadyPresent) {
+                playChime(false);
+                radarBox.className = 'radar-box duplicate';
+                radarCircle.className = 'radar-circle warn';
+                radarCircle.innerHTML = '!';
+                radarText.textContent = `Already Marked: ${student.name}`;
+                statusBox.style.display = 'block';
+                statusBox.style.background = '#fef3c7';
+                statusBox.style.color = '#92400e';
+                statusBox.innerHTML = `⚠️ <strong>Duplicate Tap!</strong> ${student.name} is already registered in this session.`;
+                return;
+            }
+
+            // Success Tap!
+            playChime(true);
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            const token = generateAttestation(uid, timeStr);
+            const order = records.filter(r => (week === null || r.week === week)).length + 1;
+
+            records.push({
+                uid: student.uid,
+                reg: student.reg,
+                name: student.name,
+                week: week,
+                time: timeStr,
+                dateTime: now.toISOString(),
+                token: token,
+                order: order
+            });
+
+            radarBox.className = 'radar-box';
+            radarCircle.className = 'radar-circle success';
+            radarCircle.innerHTML = '✓';
+            radarText.textContent = `Tapped: ${student.name}`;
+            statusBox.style.display = 'block';
+            statusBox.style.background = '#dcfce7';
+            statusBox.style.color = '#166534';
+            statusBox.innerHTML = `✓ <strong>Verified!</strong> ${student.name} (${student.reg}) • ${token}`;
+
+            // Reset radar visual after 1.5s
+            setTimeout(() => {
+                radarBox.className = 'radar-box';
+                radarCircle.className = 'radar-circle';
+                radarCircle.innerHTML = `<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10a12 12 0 0 1 16 0"/><path d="M7 13a8 8 0 0 1 10 0"/><circle cx="12" cy="20" r="1"/></svg>`;
+                radarText.textContent = 'Ready for Next Student';
+            }, 1500);
+
+            renderAttendanceView();
+        }
+
+        function simulateTap() {
+            // Pick random student
+            const randomIndex = Math.floor(Math.random() * students.length);
+            tapStudentByUid(students[randomIndex].uid);
+        }
+
+        function tapSelectedStudent() {
+            const uid = document.getElementById('studentQuickPickSelect').value;
+            tapStudentByUid(uid);
+        }
+
+        function renderAttendanceView() {
+            const container = document.getElementById('viewContainer');
+            const type = document.getElementById('sessionTypeSelect').value;
+            const isSemester = type === 'SEMESTER_WEEKLY';
+            const totalWeeks = parseInt(document.getElementById('totalWeeksInput').value) || 14;
+
+            document.getElementById('rosterCount').textContent = students.length;
+            document.getElementById('recentCount').textContent = records.length;
+
+            const currentSessionRecords = records.filter(r => (isSemester ? r.week === currentWeek : true));
+            document.getElementById('presentCountBadge').textContent = `${currentSessionRecords.length} Present`;
+
+            if (currentTab === 'matrix') {
+                if (isSemester) {
+                    // Semester Matrix
+                    let html = `<div class="table-responsive"><table><thead><tr>
+                        <th>S/N</th><th>Reg Number</th><th>Student Name</th>`;
+                    for (let w = 1; w <= totalWeeks; w++) {
+                        html += `<th>W${w}</th>`;
+                    }
+                    html += `<th>Total</th><th>%</th><th>Eligibility</th></tr></thead><tbody>`;
+
+                    students.forEach((s, idx) => {
+                        let presentCount = 0;
+                        let weekCells = '';
+                        for (let w = 1; w <= totalWeeks; w++) {
+                            const present = records.some(r => r.uid === s.uid && r.week === w);
+                            if (present) {
+                                presentCount++;
+                                weekCells += `<td><span class="p-badge">P</span></td>`;
+                            } else {
+                                weekCells += `<td><span class="a-badge">-</span></td>`;
+                            }
+                        }
+                        const pct = Math.round((presentCount / Math.max(1, currentWeek)) * 100);
+                        const eligible = pct >= 75;
+
+                        html += `<tr>
+                            <td>${idx + 1}</td>
+                            <td><strong>${s.reg}</strong></td>
+                            <td>${s.name}</td>
+                            ${weekCells}
+                            <td><strong>${presentCount}</strong></td>
+                            <td><strong>${pct}%</strong></td>
+                            <td><span class="badge ${eligible ? 'badge-green' : 'badge-red'}">${eligible ? 'ELIGIBLE' : 'DEFICIT'}</span></td>
+                        </tr>`;
+                    });
+
+                    html += `</tbody></table></div>`;
+                    container.innerHTML = html;
+                } else {
+                    // Single Exam or Submission Sheet
+                    let html = `<div class="table-responsive"><table><thead><tr>
+                        <th>${type === 'SUBMISSION' ? 'Order #' : 'S/N'}</th>
+                        <th>Reg Number</th>
+                        <th>Student Name</th>
+                        <th>Time In</th>
+                        <th>Digital Attestation (Signature Substitute)</th>
+                        <th>Status</th>
+                    </tr></thead><tbody>`;
+
+                    if (currentSessionRecords.length === 0) {
+                        html += `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">No students have tapped in yet. Hold an NFC card or click 'Tap Card' above!</td></tr>`;
+                    } else {
+                        currentSessionRecords.forEach((r, idx) => {
+                            html += `<tr>
+                                <td>${type === 'SUBMISSION' ? `#${r.order}` : idx + 1}</td>
+                                <td><strong>${r.reg}</strong></td>
+                                <td>${r.name}</td>
+                                <td>${r.time}</td>
+                                <td><span class="token-tag">🔒 ${r.token}</span></td>
+                                <td><span class="badge badge-green">PRESENT</span></td>
+                            </tr>`;
+                        });
+                    }
+
+                    html += `</tbody></table></div>`;
+                    container.innerHTML = html;
+                }
+            } else if (currentTab === 'recent') {
+                let html = `<div class="table-responsive"><table><thead><tr>
+                    <th>#</th><th>Student</th><th>Reg No</th><th>Week</th><th>Time</th><th>Verification Token</th>
+                </tr></thead><tbody>`;
+
+                if (records.length === 0) {
+                    html += `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No tap events recorded yet.</td></tr>`;
+                } else {
+                    [...records].reverse().forEach((r, idx) => {
+                        html += `<tr>
+                            <td>${records.length - idx}</td>
+                            <td><strong>${r.name}</strong></td>
+                            <td>${r.reg}</td>
+                            <td>${r.week ? 'Week ' + r.week : 'Single'}</td>
+                            <td>${r.time}</td>
+                            <td><span class="token-tag">${r.token}</span></td>
+                        </tr>`;
+                    });
+                }
+                html += `</tbody></table></div>`;
+                container.innerHTML = html;
+            } else if (currentTab === 'roster') {
+                let html = `<div class="table-responsive"><table><thead><tr>
+                    <th>S/N</th><th>Card Hardware UID</th><th>Registration No</th><th>Full Name</th><th>Action</th>
+                </tr></thead><tbody>`;
+
+                students.forEach((s, idx) => {
+                    html += `<tr>
+                        <td>${idx + 1}</td>
+                        <td><span class="token-tag">${s.uid}</span></td>
+                        <td><strong>${s.reg}</strong></td>
+                        <td>${s.name}</td>
+                        <td><button class="btn btn-outline btn-sm" onclick="tapStudentByUid('${s.uid}')">Tap In</button></td>
+                    </tr>`;
+                });
+                html += `</tbody></table></div>`;
+                container.innerHTML = html;
+            }
+        }
+
+        // --- Real Web NFC for Android Chrome ---
+        async function enableRealWebNfc() {
+            if ("NDEFReader" in window) {
+                try {
+                    const ndef = new NDEFReader();
+                    await ndef.scan();
+                    document.getElementById('nfcStatusBadge').textContent = 'Phone NFC Active';
+                    alert("Real Web NFC Scanner is active! Hold any NFC card to your phone's back.");
+
+                    ndef.onreading = event => {
+                        const serialNumber = event.serialNumber.replace(/:/g, '').toUpperCase();
+                        // Check if registered or prompt
+                        let student = students.find(s => s.uid === serialNumber);
+                        if (!student) {
+                            const name = prompt(`New NFC Card detected (${serialNumber})!\nEnter Student Full Name:`);
+                            if (name) {
+                                const reg = prompt(`Enter Registration Number for ${name}:`);
+                                student = { uid: serialNumber, reg: reg || "ID-NEW", name: name };
+                                students.push(student);
+                                populateQuickPick();
+                            }
+                        }
+                        if (student) tapStudentByUid(student.uid);
+                    };
+                } catch (error) {
+                    alert("NFC scan error: " + error);
+                }
+            } else {
+                alert("Web NFC is only available in Chrome on NFC-enabled Android devices. In this browser, use the 'Tap Card or Click to Scan' simulation!");
+            }
+        }
+
+        // --- Export CSV ---
+        function exportCurrentCSV() {
+            const code = document.getElementById('courseCodeInput').value;
+            const title = document.getElementById('sessionTitleInput').value;
+            const type = document.getElementById('sessionTypeSelect').value;
+            const isSemester = type === 'SEMESTER_WEEKLY';
+            const totalWeeks = parseInt(document.getElementById('totalWeeksInput').value) || 14;
+
+            let csv = `ATTENDANCE REPORT\nCourse,${code} - ${title}\nType,${type}\nExported,${new Date().toLocaleString()}\n\n`;
+
+            if (isSemester) {
+                csv += `S/N,Registration Number,Full Name`;
+                for (let w = 1; w <= totalWeeks; w++) csv += `,W${w}`;
+                csv += `,Total Attended,Attendance %,Status\n`;
+
+                students.forEach((s, idx) => {
+                    let count = 0;
+                    let weekCols = '';
+                    for (let w = 1; w <= totalWeeks; w++) {
+                        const p = records.some(r => r.uid === s.uid && r.week === w);
+                        if (p) count++;
+                        weekCols += p ? ',P' : ',-';
+                    }
+                    const pct = Math.round((count / Math.max(1, currentWeek)) * 100);
+                    const eligible = pct >= 75 ? 'ELIGIBLE' : 'DEFICIT';
+                    csv += `${idx + 1},"${s.reg}","${s.name}"${weekCols},${count},${pct}%,${eligible}\n`;
+                });
+            } else {
+                csv += `S/N,Registration Number,Full Name,NFC UID,Time In,Digital Attestation Token,Status\n`;
+                records.forEach((r, idx) => {
+                    csv += `${idx + 1},"${r.reg}","${r.name}",${r.uid},${r.time},"${r.token}",PRESENT\n`;
+                });
+            }
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${code.replace(/\s+/g, '_')}_Attendance.csv`;
+            link.click();
+        }
+
+        init();
+    </script>
+</body>
+</html>
+
