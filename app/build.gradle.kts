@@ -8,7 +8,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.tapattend.nfc"
+        applicationId = "com.tapattend.nfc.cloud"
         minSdk = 24
         targetSdk = 34
         versionCode = 2
