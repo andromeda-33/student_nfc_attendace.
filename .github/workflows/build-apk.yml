@@ -7,6 +7,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -25,6 +28,8 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build Debug APK
+      env:
+        FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
       run: ./gradlew assembleDebug --stacktrace --no-daemon
 
     - name: Verify APK Signature and Manifest
@@ -33,8 +38,22 @@ jobs:
         "$BUILD_TOOLS_DIR/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
         "$BUILD_TOOLS_DIR/aapt2" dump badging app/build/outputs/apk/debug/app-debug.apk | head -n 15
 
+    - name: Prepare Direct APK File
+      run: cp app/build/outputs/apk/debug/app-debug.apk TapAttend-NFC-v1.1.1.apk
+
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: TapAttend-NFC-APK
+        name: TapAttend-NFC-debug.apk
         path: app/build/outputs/apk/debug/app-debug.apk
+
+    - name: Publish Standalone APK to GitHub Releases
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v1.1.1-${{ github.run_number }}
+        name: TapAttend NFC v1.1.1 (Build #${{ github.run_number }})
+        body: |
+          Direct standalone Android APK installable with one tap (no ZIP extraction needed).
+          Includes Local NFC Card Inspector (NDEF, MIFARE Classic, MIFARE Ultralight, IsoDep) and Cloud Roster Sync.
+        files: TapAttend-NFC-v1.1.1.apk

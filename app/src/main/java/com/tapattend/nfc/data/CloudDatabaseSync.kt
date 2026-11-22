@@ -16,7 +16,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-class CloudDatabaseSync(context: Context) {
+class CloudDatabaseSync(private val context: Context) {
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("tapattend_cloud_prefs", Context.MODE_PRIVATE)
@@ -25,18 +25,42 @@ class CloudDatabaseSync(context: Context) {
         private const val PROJECT_ID = "tera-inscriber-r01dl"
         private const val DATABASE_ID =
             "ai-studio-tapattendnfc-97fb216d-8b5e-46f7-9722-155ba8a9c1bf"
-        private const val API_KEY = "AIzaSyBIrTS8bcV7qD20CwuMVEKtpiXMUZ7yD5Q"
         private const val KEY_REFRESH_TOKEN = "firebase_refresh_token"
+        private const val KEY_API_KEY = "firebase_api_key"
         private const val KEY_LAST_SYNC = "last_sync_timestamp"
     }
 
     fun getRefreshToken(): String = prefs.getString(KEY_REFRESH_TOKEN, "") ?: ""
 
-    fun saveRefreshToken(token: String) {
-        prefs.edit().putString(KEY_REFRESH_TOKEN, token.trim()).apply()
+    private fun resolveApiKey(): String {
+        val saved = prefs.getString(KEY_API_KEY, "")?.trim().orEmpty()
+        if (saved.isNotBlank()) return saved
+        val resId = context.resources.getIdentifier("firebase_api_key", "string", context.packageName)
+        if (resId != 0) {
+            return context.getString(resId).trim()
+        }
+        return ""
     }
 
-    fun isConfigured(): Boolean = getRefreshToken().isNotBlank()
+    fun saveRefreshToken(rawInput: String) {
+        val trimmed = rawInput.trim()
+        if (trimmed.startsWith("{")) {
+            try {
+                val json = JSONObject(trimmed)
+                val token = json.optString("refreshToken", "").trim()
+                val key = json.optString("apiKey", "").trim()
+                prefs.edit().apply {
+                    putString(KEY_REFRESH_TOKEN, token)
+                    if (key.isNotBlank()) putString(KEY_API_KEY, key)
+                }.apply()
+                return
+            } catch (_: Exception) {
+            }
+        }
+        prefs.edit().putString(KEY_REFRESH_TOKEN, trimmed).apply()
+    }
+
+    fun isConfigured(): Boolean = getRefreshToken().isNotBlank() && resolveApiKey().isNotBlank()
 
     fun getLastSyncTimeFormatted(): String? {
         val ts = prefs.getLong(KEY_LAST_SYNC, 0L)
@@ -55,11 +79,12 @@ class CloudDatabaseSync(context: Context) {
 
     private fun exchangeRefreshToken(): AuthSession {
         val refreshToken = getRefreshToken()
-        if (refreshToken.isBlank()) {
-            throw IllegalStateException("Cloud Sync Key not configured. Open Cloud Sync to paste your key.")
+        val apiKey = resolveApiKey()
+        if (refreshToken.isBlank() || apiKey.isBlank()) {
+            throw IllegalStateException("Paste the full APK Sync Key from the TapAttend Web App (sign in -> 'Android APK Sync Key').")
         }
 
-        val url = URL("https://securetoken.googleapis.com/v1/token?key=$API_KEY")
+        val url = URL("https://securetoken.googleapis.com/v1/token?key=$apiKey")
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/x-www-form-urlencoded")

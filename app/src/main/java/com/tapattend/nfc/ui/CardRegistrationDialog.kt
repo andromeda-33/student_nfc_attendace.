@@ -23,7 +23,7 @@ import com.tapattend.nfc.data.*
 
 @Composable
 fun CardRegistrationDialog(
-    capturedCardUid: String?,
+    capturedCardData: ParsedCardData?,
     customCourses: List<CustomCourse>,
     isCloudConfigured: Boolean,
     onSimulateCardUid: (String) -> Unit,
@@ -32,6 +32,7 @@ fun CardRegistrationDialog(
     onSaveStudent: (Student) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val capturedCardUid = capturedCardData?.cardUid
     val defaultUni = KenyanUniversities.getById(KenyanUniversities.DEFAULT_UNIVERSITY_ID)
 
     var selectedUniId by remember { mutableStateOf(defaultUni.id) }
@@ -76,6 +77,35 @@ fun CardRegistrationDialog(
 
     var regNumber by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
+
+    LaunchedEffect(capturedCardData) {
+        if (capturedCardData != null) {
+            if (!capturedCardData.suggestedRegNumber.isNullOrBlank()) {
+                regNumber = capturedCardData.suggestedRegNumber
+            }
+            if (!capturedCardData.suggestedName.isNullOrBlank()) {
+                fullName = capturedCardData.suggestedName
+            }
+            if (!capturedCardData.suggestedDepartment.isNullOrBlank()) {
+                val matchedDept = selectedUni.departments.find {
+                    it.name.equals(capturedCardData.suggestedDepartment, ignoreCase = true)
+                }
+                if (matchedDept != null) {
+                    useCustomDept = false
+                    selectedDept = matchedDept.name
+                } else {
+                    useCustomDept = true
+                    customDeptName = capturedCardData.suggestedDepartment
+                }
+            }
+            if (!capturedCardData.suggestedCourse.isNullOrBlank()) {
+                selectedCourseName = capturedCardData.suggestedCourse
+                if (!capturedCardData.suggestedCourseCode.isNullOrBlank()) {
+                    selectedCourseCode = capturedCardData.suggestedCourseCode
+                }
+            }
+        }
+    }
 
     var uniDropdownOpen by remember { mutableStateOf(false) }
     var deptDropdownOpen by remember { mutableStateOf(false) }
@@ -154,7 +184,15 @@ fun CardRegistrationDialog(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        if (hasCard) "Card Captured!" else "Bring Student Card Closer",
+                                        if (hasCard) {
+                                            if (capturedCardData?.hasLocalStudentData == true) {
+                                                "Card Read Locally (${capturedCardData.memorySource})"
+                                            } else {
+                                                "Card Captured! (${capturedCardData?.memorySource ?: "UID Only"})"
+                                            }
+                                        } else {
+                                            "Bring Student Card Closer"
+                                        },
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp,
                                         color = if (hasCard) Color(0xFF065F46) else Color(0xFF0C4A6E)

@@ -6,7 +6,7 @@ import {
   User,
 } from 'firebase/auth';
 import { Check, Copy, KeyRound, X } from 'lucide-react';
-import { auth, googleProvider } from './firebase';
+import { auth, firebaseAppConfig, googleProvider } from './firebase';
 import { DEFAULT_UNIVERSITY_ID } from './data/kenyanUniversities';
 import {
   AttendanceRecord,
@@ -52,6 +52,13 @@ import { LiveScanScreen } from './components/LiveScanScreen';
 import { SemesterMatrixScreen } from './components/SemesterMatrixScreen';
 import { StudentRosterScreen } from './components/StudentRosterScreen';
 import { CardRegistrationModal } from './components/CardRegistrationModal';
+import { CardInspectorModal } from './components/CardInspectorModal';
+import {
+  decodeWebNdefReading,
+  formatWebNfcError,
+  isEmbeddedIframe,
+  WebNdefReadingEventLike,
+} from './utils/nfcParser';
 
 type AppScreen = 'HOME' | 'LIVE_SCAN' | 'SEMESTER_MATRIX' | 'STUDENT_ROSTER';
 
@@ -73,6 +80,9 @@ export default function App() {
   const [activeWeek, setActiveWeek] = useState<number>(1);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showCardRegisterModal, setShowCardRegisterModal] = useState(false);
+  const [pendingRegistrationCard, setPendingRegistrationCard] =
+    useState<ParsedCardData | null>(null);
+  const [showCardInspectorModal, setShowCardInspectorModal] = useState(false);
   const [showApkLinkModal, setShowApkLinkModal] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
 
@@ -167,7 +177,13 @@ export default function App() {
       setLastScannedUid(cleanUid);
 
       if (!activeSession || screen !== 'LIVE_SCAN') {
-        showToast(`NFC Card Scanned: ${cleanUid}`);
+        if (cardData.hasLocalStudentData) {
+          showToast(
+            `Read locally: ${cardData.suggestedName} (${cardData.suggestedRegNumber})`
+          );
+        } else {
+          showToast(`NFC Card Scanned: ${cleanUid}`);
+        }
         return;
       }
 
@@ -201,6 +217,54 @@ export default function App() {
         showToast(
           `Blocked: ${result.student.fullName} belongs to ${result.student.courseName}`
         );
+      } else if (cardData.hasLocalStudentData) {
+        // Offline local card recognition: student Name + Reg + Course read straight from card memory
+        const autoRes = await enrollAndRecordTap({
+          session: activeSession,
+          cardUid: cleanUid,
+          weekNumber: weekNum,
+          existingStudentIdToLink: null,
+          newRegNumber: cardData.suggestedRegNumber,
+          newFullName: cardData.suggestedName,
+          universityId: activeSession.universityId,
+          universityName: activeSession.universityName,
+          department: cardData.suggestedDepartment || activeSession.department,
+          courseCode: cardData.suggestedCourseCode || activeSession.courseCode,
+          courseName:
+            cardData.suggestedCourse ||
+            activeSession.allowedCourses[0] ||
+            'General Programme',
+        });
+
+        if (autoRes.type === 'SUCCESS') {
+          playSuccessChime();
+          setLastScanResult({
+            status: `VERIFIED: ${autoRes.student.fullName}`,
+            record: autoRes.record,
+          });
+          refreshData();
+          if (user) {
+            void pushStudentToCloud(autoRes.student, user.uid);
+            void pushRecordToCloud(autoRes.record, user.uid);
+          }
+          showToast(`Read from card & marked present: ${autoRes.student.fullName}`);
+        } else if (autoRes.type === 'WRONG_COURSE') {
+          playUnrecognizedSound();
+          setLastScanResult({
+            status: `WRONG_COURSE: ${autoRes.student.courseName}`,
+            record: null,
+            wrongCourseStudent: autoRes.student,
+          });
+          showToast(
+            `Blocked: ${autoRes.student.fullName} belongs to ${autoRes.student.courseName}`
+          );
+        } else if (autoRes.type === 'DUPLICATE') {
+          playDuplicateWarningBuzz();
+          setLastScanResult({
+            status: 'ALREADY SCANNED TODAY',
+            record: autoRes.record,
+          });
+        }
       } else {
         playUnrecognizedSound();
         setLastScanResult({
@@ -217,7 +281,7 @@ export default function App() {
     const win = window as unknown as {
       NDEFReader?: new () => {
         scan: () => Promise<void>;
-        onreading: ((event: { serialNumber?: string }) => void) | null;
+        onreading: ((event: WebNdefReadingEventLike) => void) | null;
       };
     };
 
@@ -228,19 +292,26 @@ export default function App() {
       return;
     }
 
+    if (isEmbeddedIframe()) {
+      showToast(
+        'Web NFC is blocked inside embedded preview frames. Open the Shared App URL in a standalone Android Chrome tab or use the Android APK.'
+      );
+      return;
+    }
+
     try {
       const ndef = new win.NDEFReader();
       await ndef.scan();
       setWebNfcActive(true);
       showToast('Web NFC active! Hold a student card to the back of the device.');
       ndef.onreading = (event) => {
-        const serial = normalizeUid(event.serialNumber || '');
-        if (serial) {
-          void processCardData({ cardUid: serial });
+        const parsed = decodeWebNdefReading(event);
+        if (parsed.cardUid) {
+          void processCardData(parsed);
         }
       };
     } catch (err) {
-      showToast(`NFC error: ${String(err)}`);
+      showToast(formatWebNfcError(err).message);
     }
   };
 
@@ -271,7 +342,11 @@ export default function App() {
           }}
           onCreateNewSession={() => setShowCreateDialog(true)}
           onOpenRoster={() => setScreen('STUDENT_ROSTER')}
-          onOpenCardRegistration={() => setShowCardRegisterModal(true)}
+          onOpenCardRegistration={() => {
+            setPendingRegistrationCard(null);
+            setShowCardRegisterModal(true);
+          }}
+          onOpenCardInspector={() => setShowCardInspectorModal(true)}
           onSyncDatabase={() => void handleSyncDatabase()}
           onOpenApkLink={() => setShowApkLinkModal(true)}
           onSignIn={() => void handleSignIn()}
@@ -309,9 +384,13 @@ export default function App() {
 
       {showCardRegisterModal && (
         <CardRegistrationModal
+          initialCardData={pendingRegistrationCard}
           customCourses={customCourses}
           isSignedIn={Boolean(user)}
-          onDismiss={() => setShowCardRegisterModal(false)}
+          onDismiss={() => {
+            setShowCardRegisterModal(false);
+            setPendingRegistrationCard(null);
+          }}
           onStudentSaved={async (savedStudent) => {
             refreshData();
             if (user) {
@@ -327,56 +406,73 @@ export default function App() {
         />
       )}
 
-      {showApkLinkModal && user && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md p-5 space-y-3.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <KeyRound className="w-5 h-5 text-[#0284C7]" />
-                <h3 className="text-base font-bold text-slate-900">
-                  Link Android APK to Cloud DB
-                </h3>
+      {showCardInspectorModal && (
+        <CardInspectorModal
+          onDismiss={() => setShowCardInspectorModal(false)}
+          onSendToRegistration={(parsed) => {
+            setShowCardInspectorModal(false);
+            setPendingRegistrationCard(parsed);
+            setShowCardRegisterModal(true);
+          }}
+        />
+      )}
+
+      {showApkLinkModal && user && (() => {
+        const apkSyncPayload = JSON.stringify({
+          apiKey: firebaseAppConfig.apiKey,
+          refreshToken: user.refreshToken,
+        });
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md p-5 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-5 h-5 text-[#0284C7]" />
+                  <h3 className="text-base font-bold text-slate-900">
+                    Link Android APK to Cloud DB
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setShowApkLinkModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => setShowApkLinkModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Copy this Cloud Sync Key and paste it once inside your Android APK&apos;s{' '}
-              <strong>Cloud Sync</strong> menu. Your APK will then push newly tapped student cards and pull updates whenever you press{' '}
-              <strong>Update Roster</strong>.
-            </p>
-            <div className="rounded-xl bg-slate-100 border border-slate-200 p-3 font-mono text-[11px] break-all max-h-28 overflow-y-auto text-slate-800">
-              {user.refreshToken}
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  void navigator.clipboard.writeText(user.refreshToken);
-                  setCopiedToken(true);
-                  setTimeout(() => setCopiedToken(false), 2000);
-                }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold cursor-pointer"
-              >
-                {copiedToken ? (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4" />
-                    <span>Copy Sync Key</span>
-                  </>
-                )}
-              </button>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Copy this Cloud Sync Key and paste it once inside your Android APK&apos;s{' '}
+                <strong>Cloud Sync</strong> menu. Your APK will then push newly tapped student cards and pull updates whenever you press{' '}
+                <strong>Update Roster</strong>.
+              </p>
+              <div className="rounded-xl bg-slate-100 border border-slate-200 p-3 font-mono text-[11px] break-all max-h-28 overflow-y-auto text-slate-800">
+                {apkSyncPayload}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(apkSyncPayload);
+                    setCopiedToken(true);
+                    setTimeout(() => setCopiedToken(false), 2000);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold cursor-pointer"
+                >
+                  {copiedToken ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copy Sync Key</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {screen === 'LIVE_SCAN' && activeSession && (
         <LiveScanScreen

@@ -107,6 +107,13 @@ export interface ParsedCardData {
   ndefText?: string;
   suggestedName?: string;
   suggestedRegNumber?: string;
+  suggestedCourse?: string;
+  suggestedCourseCode?: string;
+  suggestedDepartment?: string;
+  techList?: string[];
+  memorySource?: string;
+  rawDump?: string;
+  hasLocalStudentData?: boolean;
 }
 
 export enum ExportFormat {

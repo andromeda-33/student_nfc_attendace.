@@ -8,11 +8,14 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.tapattend.nfc.cloud"
+        applicationId = "com.tapattend.nfc"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
+
+        val envFirebaseKey = System.getenv("FIREBASE_API_KEY") ?: ""
+        resValue("string", "firebase_api_key", envFirebaseKey)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

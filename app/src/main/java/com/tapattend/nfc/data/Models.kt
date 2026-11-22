@@ -116,5 +116,12 @@ data class ParsedCardData(
     val cardUid: String,
     val ndefText: String? = null,
     val suggestedName: String? = null,
-    val suggestedRegNumber: String? = null
+    val suggestedRegNumber: String? = null,
+    val suggestedCourse: String? = null,
+    val suggestedCourseCode: String? = null,
+    val suggestedDepartment: String? = null,
+    val techList: List<String> = emptyList(),
+    val memorySource: String = "UID Only",
+    val rawDump: String = "",
+    val hasLocalStudentData: Boolean = false
 )

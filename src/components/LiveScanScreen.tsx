@@ -783,9 +783,16 @@ const QuickEnrollDialog: React.FC<QuickEnrollDialogProps> = ({
   const [mode, setMode] = useState<'new' | 'link'>('new');
   const [fullName, setFullName] = useState(cardData.suggestedName || '');
   const [regNumber, setRegNumber] = useState(cardData.suggestedRegNumber || '');
-  const [department, setDepartment] = useState(session.department);
+  const [department, setDepartment] = useState(
+    cardData.suggestedDepartment || session.department
+  );
+  const matchedSessionCourse = cardData.suggestedCourse
+    ? session.allowedCourses.find(
+        (c) => c.toLowerCase() === cardData.suggestedCourse?.toLowerCase()
+      )
+    : undefined;
   const [courseName, setCourseName] = useState(
-    session.allowedCourses[0] || 'B.Sc. Computer Science'
+    matchedSessionCourse || session.allowedCourses[0] || 'B.Sc. Computer Science'
   );
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');

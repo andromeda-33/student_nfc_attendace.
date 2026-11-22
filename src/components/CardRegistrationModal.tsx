@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Database,
+  ExternalLink,
   Nfc,
   PlusCircle,
   Smartphone,
@@ -14,8 +15,14 @@ import {
   getUniversityById,
   KENYAN_UNIVERSITIES,
 } from '../data/kenyanUniversities';
-import { CustomCourse, Student } from '../types/tapattend';
+import { CustomCourse, ParsedCardData, Student } from '../types/tapattend';
 import { playSuccessChime, playUnrecognizedSound } from '../utils/audio';
+import {
+  decodeWebNdefReading,
+  formatWebNfcError,
+  isEmbeddedIframe,
+  WebNdefReadingEventLike,
+} from '../utils/nfcParser';
 import {
   addCustomCourseLocal,
   addOrUpdateStudent,
@@ -24,6 +31,7 @@ import {
 } from '../utils/storage';
 
 interface CardRegistrationModalProps {
+  initialCardData?: ParsedCardData | null;
   customCourses: CustomCourse[];
   isSignedIn: boolean;
   onDismiss: () => void;
@@ -32,6 +40,7 @@ interface CardRegistrationModalProps {
 }
 
 export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
+  initialCardData = null,
   customCourses,
   isSignedIn,
   onDismiss,
@@ -42,6 +51,7 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
   const [formOpen, setFormOpen] = useState(false);
   const [webNfcListening, setWebNfcListening] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [iframeBlocked, setIframeBlocked] = useState(false);
 
   const [universityId, setUniversityId] = useState(DEFAULT_UNIVERSITY_ID);
   const [customUniversityName, setCustomUniversityName] = useState('');
@@ -128,8 +138,8 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
     }
   };
 
-  const handleCardCaptured = (rawUid: string) => {
-    const cleanUid = normalizeUid(rawUid);
+  const applyParsedCard = (parsed: ParsedCardData) => {
+    const cleanUid = normalizeUid(parsed.cardUid);
     if (!cleanUid) return;
     setScannedUid(cleanUid);
     setFormOpen(true);
@@ -140,20 +150,53 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
       setFullName(existing.fullName);
       setRegNumber(existing.regNumber);
       setUniversityId(existing.universityId || DEFAULT_UNIVERSITY_ID);
+      setIsCustomDept(false);
       setDepartment(existing.department);
       setSelectedCourseName(existing.courseName);
       setStatusNote(
         `Card ${cleanUid} is already registered to ${existing.fullName}. Edit below to update.`
       );
+      return;
+    }
+
+    if (parsed.hasLocalStudentData) {
+      playSuccessChime();
+      setFullName(parsed.suggestedName || '');
+      setRegNumber(parsed.suggestedRegNumber || '');
+      if (parsed.suggestedDepartment) {
+        const matchedDept = selectedUni.departments.find(
+          (d) => d.name.toLowerCase() === parsed.suggestedDepartment!.toLowerCase()
+        );
+        if (matchedDept) {
+          setIsCustomDept(false);
+          setDepartment(matchedDept.name);
+        } else {
+          setIsCustomDept(true);
+          setCustomDeptInput(parsed.suggestedDepartment);
+        }
+      }
+      if (parsed.suggestedCourse) {
+        setSelectedCourseName(parsed.suggestedCourse);
+      }
+      setStatusNote(
+        `Local card memory decoded (${parsed.memorySource || 'NDEF'})! Verify and save below.`
+      );
     } else {
       playUnrecognizedSound();
-      setFullName('');
-      setRegNumber('');
+      setFullName(parsed.suggestedName || '');
+      setRegNumber(parsed.suggestedRegNumber || '');
       setStatusNote(
         `New card detected (${cleanUid})! Complete the student details below.`
       );
     }
   };
+
+  useEffect(() => {
+    if (initialCardData?.cardUid) {
+      applyParsedCard(initialCardData);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCardData]);
 
   const handleSimulateCardNear = () => {
     const randomHex =
@@ -161,14 +204,14 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
       Math.floor(0x10000000 + Math.random() * 0xefffffff)
         .toString(16)
         .toUpperCase();
-    handleCardCaptured(randomHex);
+    applyParsedCard({ cardUid: randomHex });
   };
 
   const handleStartWebNfc = async () => {
     const win = window as unknown as {
       NDEFReader?: new () => {
         scan: () => Promise<void>;
-        onreading: ((event: { serialNumber?: string }) => void) | null;
+        onreading: ((event: WebNdefReadingEventLike) => void) | null;
       };
     };
     if (!win.NDEFReader) {
@@ -177,17 +220,27 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
       );
       return;
     }
+    if (isEmbeddedIframe()) {
+      setIframeBlocked(true);
+      setStatusNote(
+        'Chrome blocks Web NFC inside embedded frames. Open this page in a standalone tab on Android Chrome or use the Android APK.'
+      );
+      return;
+    }
     try {
       const ndef = new win.NDEFReader();
       await ndef.scan();
       setWebNfcListening(true);
+      setIframeBlocked(false);
       setStatusNote('NFC Listener Active — bring a student card closer to the phone.');
       ndef.onreading = (ev) => {
-        const uid = normalizeUid(ev.serialNumber || '');
-        if (uid) handleCardCaptured(uid);
+        const parsed = decodeWebNdefReading(ev);
+        if (parsed.cardUid) applyParsedCard(parsed);
       };
     } catch (err) {
-      setStatusNote(`NFC error: ${String(err)}`);
+      const formatted = formatWebNfcError(err);
+      if (formatted.isIframeBlocked) setIframeBlocked(true);
+      setStatusNote(formatted.message);
     }
   };
 
@@ -334,9 +387,22 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
           </div>
 
           {statusNote && (
-            <div className="rounded-xl bg-slate-100 border border-slate-200 px-3.5 py-2.5 text-xs text-slate-700 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-[#0284C7] shrink-0" />
-              <span>{statusNote}</span>
+            <div className="rounded-xl bg-slate-100 border border-slate-200 px-3.5 py-2.5 text-xs text-slate-700 space-y-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-[#0284C7] shrink-0" />
+                <span>{statusNote}</span>
+              </div>
+              {iframeBlocked && typeof window !== 'undefined' && (
+                <a
+                  href={window.location.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0284C7] text-white font-semibold"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open Standalone Tab for Web NFC</span>
+                </a>
+              )}
             </div>
           )}
 

@@ -48,7 +48,9 @@ class MainActivity : ComponentActivity() {
     private var lastScanResult by mutableStateOf<ScanBannerState?>(null)
     private var pendingCardToEnroll by mutableStateOf<ParsedCardData?>(null)
     private var showCardRegisterDialog by mutableStateOf(false)
-    private var pendingRegistrationUid by mutableStateOf<String?>(null)
+    private var pendingRegistrationCard by mutableStateOf<ParsedCardData?>(null)
+    private var showCardInspector by mutableStateOf(false)
+    private var inspectedCardData by mutableStateOf<ParsedCardData?>(null)
     private var showExportFormatDialog by mutableStateOf(false)
     private var isSyncing by mutableStateOf(false)
     private var refreshTrigger by mutableIntStateOf(0)
@@ -100,8 +102,12 @@ class MainActivity : ComponentActivity() {
                                 onCreateNewSession = { showCreateDialog = true },
                                 onOpenRoster = { currentScreen = AppScreen.STUDENT_ROSTER },
                                 onOpenCardRegistration = {
-                                    pendingRegistrationUid = null
+                                    pendingRegistrationCard = null
                                     showCardRegisterDialog = true
+                                },
+                                onOpenCardInspector = {
+                                    inspectedCardData = null
+                                    showCardInspector = true
                                 },
                                 onUpdateDatabase = {
                                     performDatabaseSync(
@@ -270,7 +276,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                 },
                                 onOpenCardRegistration = {
-                                    pendingRegistrationUid = null
+                                    pendingRegistrationCard = null
                                     showCardRegisterDialog = true
                                 },
                                 onAddStudent = { newStudent ->
@@ -298,14 +304,18 @@ class MainActivity : ComponentActivity() {
 
                     if (showCardRegisterDialog) {
                         CardRegistrationDialog(
-                            capturedCardUid = pendingRegistrationUid,
+                            capturedCardData = pendingRegistrationCard,
                             customCourses = customCourses,
                             isCloudConfigured = cloudSync.isConfigured(),
                             onSimulateCardUid = { fakeUid ->
                                 nfcHelper.playSuccessFeedback()
-                                pendingRegistrationUid = fakeUid
+                                pendingRegistrationCard = nfcHelper.parseTextIntoCardData(
+                                    cardUid = fakeUid,
+                                    rawText = null,
+                                    memorySource = "Simulated UID Card"
+                                )
                             },
-                            onClearCardUid = { pendingRegistrationUid = null },
+                            onClearCardUid = { pendingRegistrationCard = null },
                             onAddCustomCourse = { course ->
                                 val saved = storage.addCustomCourse(course)
                                 refreshTrigger++
@@ -316,7 +326,7 @@ class MainActivity : ComponentActivity() {
                             onSaveStudent = { student ->
                                 val saved = storage.addOrUpdateStudent(student)
                                 refreshTrigger++
-                                pendingRegistrationUid = null
+                                pendingRegistrationCard = null
                                 lifecycleScope.launch {
                                     val cloudRes = cloudSync.pushStudent(saved)
                                     val msg = if (cloudRes.isSuccess && cloudSync.isConfigured()) {
@@ -329,7 +339,35 @@ class MainActivity : ComponentActivity() {
                             },
                             onDismiss = {
                                 showCardRegisterDialog = false
-                                pendingRegistrationUid = null
+                                pendingRegistrationCard = null
+                            }
+                        )
+                    }
+
+                    if (showCardInspector) {
+                        CardInspectorDialog(
+                            inspectedCard = inspectedCardData,
+                            onSimulateLocalCard = {
+                                val fakeUid = "04%08X".format((0x10000000..0x7FFFFFFF).random())
+                                val sampleText = "Name: Faith Nyambura\nReg: C026-01-1142/2023\nDepartment: Department of Computer Science\nCourse: B.Sc. Computer Science"
+                                inspectedCardData = nfcHelper.parseTextIntoCardData(
+                                    cardUid = fakeUid,
+                                    rawText = sampleText,
+                                    techList = listOf("NfcA", "MifareUltralight", "Ndef"),
+                                    memorySource = "Simulated NDEF Payload",
+                                    rawDump = "Card UID: $fakeUid\nTechnologies: NfcA, MifareUltralight, Ndef\n\n$sampleText"
+                                )
+                                nfcHelper.playSuccessFeedback()
+                            },
+                            onClear = { inspectedCardData = null },
+                            onSendToRegistration = { parsed ->
+                                showCardInspector = false
+                                pendingRegistrationCard = parsed
+                                showCardRegisterDialog = true
+                            },
+                            onDismiss = {
+                                showCardInspector = false
+                                inspectedCardData = null
                             }
                         )
                     }
@@ -391,12 +429,24 @@ class MainActivity : ComponentActivity() {
                 intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
             } ?: return
 
-            val parsedData = nfcHelper.parseStudentCard(tag)
+            val parsedData = nfcHelper.parseStudentCard(tag, intent)
             lastScannedUid = parsedData.cardUid
+
+            if (showCardInspector) {
+                inspectedCardData = parsedData
+                if (parsedData.hasLocalStudentData || !parsedData.ndefText.isNullOrBlank()) {
+                    nfcHelper.playSuccessFeedback()
+                    Toast.makeText(this, "Local card data read: ${parsedData.memorySource}", Toast.LENGTH_SHORT).show()
+                } else {
+                    nfcHelper.playDuplicateWarningFeedback()
+                    Toast.makeText(this, "Card UID read (${parsedData.cardUid}) — memory locked/empty", Toast.LENGTH_SHORT).show()
+                }
+                return
+            }
 
             if (showCardRegisterDialog) {
                 nfcHelper.playSuccessFeedback()
-                pendingRegistrationUid = parsedData.cardUid
+                pendingRegistrationCard = parsedData
                 Toast.makeText(this, "Card captured: ${parsedData.cardUid}", Toast.LENGTH_SHORT).show()
                 return
             }
@@ -414,7 +464,12 @@ class MainActivity : ComponentActivity() {
         val cardUid = cardData.cardUid
 
         if (session == null || currentScreen != AppScreen.LIVE_SCAN) {
-            Toast.makeText(this, "NFC Card Scanned: $cardUid", Toast.LENGTH_SHORT).show()
+            val summary = if (cardData.hasLocalStudentData) {
+                "Read locally: ${cardData.suggestedName} (${cardData.suggestedRegNumber})"
+            } else {
+                "NFC Card Scanned: $cardUid"
+            }
+            Toast.makeText(this, summary, Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -423,7 +478,11 @@ class MainActivity : ComponentActivity() {
         handleRecordResult(result, cardData)
     }
 
-    private fun handleRecordResult(result: AttendanceStorage.RecordResult, cardData: ParsedCardData) {
+    private fun handleRecordResult(
+        result: AttendanceStorage.RecordResult,
+        cardData: ParsedCardData,
+        allowAutoEnrollFromCard: Boolean = true
+    ) {
         when (result) {
             is AttendanceStorage.RecordResult.Success -> {
                 nfcHelper.playSuccessFeedback()
@@ -449,9 +508,30 @@ class MainActivity : ComponentActivity() {
                 ).show()
             }
             is AttendanceStorage.RecordResult.UnknownCard -> {
-                nfcHelper.playUnrecognizedStudentFeedback()
-                lastScanResult = ScanBannerState("UNKNOWN CARD: ${result.cardUid}", null)
-                pendingCardToEnroll = cardData
+                val session = activeSession
+                if (allowAutoEnrollFromCard && session != null && cardData.hasLocalStudentData) {
+                    val weekNum = if (session.isMultiSession()) activeWeek else null
+                    val autoRes = storage.enrollAndRecordTap(
+                        session = session,
+                        cardUid = cardData.cardUid,
+                        weekNumber = weekNum,
+                        newRegNumber = cardData.suggestedRegNumber,
+                        newFullName = cardData.suggestedName,
+                        universityId = session.universityId,
+                        universityName = session.universityName,
+                        department = cardData.suggestedDepartment ?: session.department,
+                        courseCode = cardData.suggestedCourseCode ?: session.courseCode,
+                        courseName = cardData.suggestedCourse ?: session.allowedCourses.firstOrNull() ?: "General Programme"
+                    )
+                    if (autoRes is AttendanceStorage.RecordResult.Success) {
+                        lifecycleScope.launch { cloudSync.pushStudent(autoRes.student) }
+                    }
+                    handleRecordResult(autoRes, cardData, allowAutoEnrollFromCard = false)
+                } else {
+                    nfcHelper.playUnrecognizedStudentFeedback()
+                    lastScanResult = ScanBannerState("UNKNOWN CARD: ${result.cardUid}", null)
+                    pendingCardToEnroll = cardData
+                }
             }
         }
     }

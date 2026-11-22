@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Contact,
+  Cpu,
   FileSpreadsheet,
   KeyRound,
   LogIn,
@@ -32,6 +33,7 @@ interface HomeScreenProps {
   onCreateNewSession: () => void;
   onOpenRoster: () => void;
   onOpenCardRegistration: () => void;
+  onOpenCardInspector: () => void;
   onSyncDatabase: () => void;
   onOpenApkLink: () => void;
   onSignIn: () => void;
@@ -50,6 +52,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onCreateNewSession,
   onOpenRoster,
   onOpenCardRegistration,
+  onOpenCardInspector,
   onSyncDatabase,
   onOpenApkLink,
   onSignIn,
@@ -133,7 +136,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {userEmail && (
               <button
                 onClick={onOpenApkLink}
@@ -143,6 +146,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 <span>Android APK Sync Key</span>
               </button>
             )}
+            <button
+              onClick={onOpenCardInspector}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-50 border border-violet-200 text-violet-800 text-xs font-semibold hover:bg-violet-100 cursor-pointer"
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>Inspect / Test Card</span>
+            </button>
             <button
               onClick={onOpenCardRegistration}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#059669] hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"

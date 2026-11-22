@@ -35,6 +35,7 @@ fun HomeScreen(
     onCreateNewSession: () -> Unit,
     onOpenRoster: () -> Unit,
     onOpenCardRegistration: () -> Unit,
+    onOpenCardInspector: () -> Unit,
     onUpdateDatabase: () -> Unit,
     onSaveSyncKey: (String) -> Unit,
     onDeleteSession: (AttendanceSession) -> Unit
@@ -150,7 +151,18 @@ fun HomeScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = onOpenCardInspector,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Memory, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFF7C3AED))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Inspect / Test Card (Read Local Chip Data)", fontSize = 12.sp, color = Color(0xFF6D28D9))
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
 
             Text(
                 "Attendance Sessions & Sheets",

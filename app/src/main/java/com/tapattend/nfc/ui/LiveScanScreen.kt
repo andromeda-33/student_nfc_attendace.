@@ -488,12 +488,17 @@ fun QuickEnrollOnTapDialog(
     var fullName by remember { mutableStateOf(cardData.suggestedName ?: "") }
 
     val uni = remember(session.universityId) { KenyanUniversities.getById(session.universityId) }
-    var department by remember { mutableStateOf(session.department) }
+    var department by remember { mutableStateOf(cardData.suggestedDepartment ?: session.department) }
     val sessionCourses = remember(session, customCourses) {
         val allowed = session.allowedCourses
         if (allowed.isNotEmpty()) allowed else listOf("General Programme")
     }
-    var selectedCourse by remember { mutableStateOf(sessionCourses.first()) }
+    var selectedCourse by remember {
+        val matched = cardData.suggestedCourse?.let { sc ->
+            sessionCourses.find { it.equals(sc, ignoreCase = true) }
+        }
+        mutableStateOf(matched ?: sessionCourses.first())
+    }
     var courseDropdownOpen by remember { mutableStateOf(false) }
 
     var selectedStudentId by remember { mutableStateOf<String?>(null) }
