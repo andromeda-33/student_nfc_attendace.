@@ -362,7 +362,37 @@ function normalizeCourseBase(raw: string): string {
     .trim();
 }
 
+const UNIQUE_DEPARTMENTS: PresetDepartment[] = (() => {
+  const seen = new Set<string>();
+  const out: PresetDepartment[] = [];
+  for (const d of [...DEKUT_COMBINED_DEPTS, ...ALL_KENYAN_DEPARTMENTS]) {
+    const k = d.name.toLowerCase();
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(d);
+    }
+  }
+  return out;
+})();
+
+const CODE_TO_DEPT_MAP = new Map<string, string>();
+const EXACT_COURSE_TO_DEPT_MAP = new Map<string, string>();
+for (const dept of UNIQUE_DEPARTMENTS) {
+  for (const course of dept.courses) {
+    const codeKey = course.code.trim().toUpperCase();
+    if (!CODE_TO_DEPT_MAP.has(codeKey)) CODE_TO_DEPT_MAP.set(codeKey, dept.name);
+    const courseKey = course.name.trim().toLowerCase();
+    if (!EXACT_COURSE_TO_DEPT_MAP.has(courseKey)) EXACT_COURSE_TO_DEPT_MAP.set(courseKey, dept.name);
+  }
+}
+
+const TOKEN_CACHE = new Map<string, string[]>();
+
 function extractCoreTokens(raw: string): string[] {
+  const key = raw.trim().toLowerCase();
+  const cached = TOKEN_CACHE.get(key);
+  if (cached) return cached;
+
   const baseWords = Array.from(
     new Set(
       normalizeCourseBase(raw)
@@ -372,7 +402,9 @@ function extractCoreTokens(raw: string): string[] {
     )
   );
   const nonStop = baseWords.filter((t) => !COURSE_STOP_WORDS.has(t));
-  return nonStop.length > 0 ? nonStop : baseWords;
+  const result = nonStop.length > 0 ? nonStop : baseWords;
+  if (TOKEN_CACHE.size < 512) TOKEN_CACHE.set(key, result);
+  return result;
 }
 
 function levenshtein(a: string, b: string): number {
@@ -448,20 +480,15 @@ export function inferDepartmentFromCourse(
   courseCode?: string
 ): string | undefined {
   if (courseCode) {
-    for (const uni of KENYAN_UNIVERSITIES) {
-      for (const dept of uni.departments) {
-        if (dept.courses.some((c) => c.code.toUpperCase() === courseCode.trim().toUpperCase())) {
-          return dept.name;
-        }
-      }
-    }
+    const byCode = CODE_TO_DEPT_MAP.get(courseCode.trim().toUpperCase());
+    if (byCode) return byCode;
   }
   if (courseName) {
-    for (const uni of KENYAN_UNIVERSITIES) {
-      for (const dept of uni.departments) {
-        if (dept.courses.some((c) => isCourseMatch(c.name, courseName))) {
-          return dept.name;
-        }
+    const byExact = EXACT_COURSE_TO_DEPT_MAP.get(courseName.trim().toLowerCase());
+    if (byExact) return byExact;
+    for (const dept of UNIQUE_DEPARTMENTS) {
+      if (dept.courses.some((c) => isCourseMatch(c.name, courseName))) {
+        return dept.name;
       }
     }
   }

@@ -181,6 +181,14 @@ export function parseTextIntoCardData(
       }
     }
 
+    const findKenyanRegMatch = (input: string): RegExpMatchArray | null => {
+      return (
+        input.match(/\b([A-Z]{1,5}\d{2,4}\s*[-/]\s*[A-Z0-9]{1,4}\s*[-/]\s*\d{2,6}\s*\/\s*\d{2,4})/i) ||
+        input.match(/\b([A-Z]{1,5}\d{2,4}\s*[-/]\s*\d{2,6}\s*\/\s*\d{2,4})/i) ||
+        input.match(/\b([A-Z]{2,6}\s*\/\s*\d{2,6}\s*\/\s*\d{2,4})/i)
+      );
+    };
+
     // 3. Fallback delimited tokens (pipe, tab, newline, comma, semicolon)
     if (!suggestedRegNumber || !suggestedName || !suggestedCourse) {
       const tokens = trimmed
@@ -188,9 +196,23 @@ export function parseTextIntoCardData(
         .map((t) => t.trim())
         .filter((t) => t.length > 0 && !t.startsWith('{'));
 
-      for (const token of tokens) {
+      for (const rawToken of tokens) {
+        let token = rawToken;
+        const embeddedMatch = findKenyanRegMatch(token);
+        if (embeddedMatch && embeddedMatch[0]) {
+          if (!suggestedRegNumber) {
+            suggestedRegNumber = embeddedMatch[0].replace(/\s+/g, '').toUpperCase();
+          }
+          const idx = embeddedMatch.index ?? token.indexOf(embeddedMatch[0]);
+          const stripped = `${token.slice(0, idx)} ${token.slice(idx + embeddedMatch[0].length)}`
+            .replace(/^[\s\-/|,;]+|[\s\-/|,;]+$/g, '')
+            .trim();
+          if (!stripped) continue;
+          token = stripped;
+        }
+
         if (!suggestedRegNumber && isLikelyRegNumber(token)) {
-          suggestedRegNumber = token.toUpperCase();
+          suggestedRegNumber = token.replace(/\s+/g, '').toUpperCase();
         } else if (!suggestedDepartment && isLikelyDepartment(token)) {
           suggestedDepartment = token;
         } else if (!suggestedCourse && isLikelyCourse(token)) {
@@ -201,13 +223,11 @@ export function parseTextIntoCardData(
       }
     }
 
-    // 4. Kenyan University Reg No Regex
+    // 4. Kenyan University Reg No Regex (supports glued tokens like "E021-01-1034/2024Bachelor")
     if (!suggestedRegNumber) {
-      const match =
-        trimmed.match(/\b[A-Z]{1,4}\d{2,4}[-/]\d{2,6}(?:[-/]\d{2,6})?\/\d{2,4}\b/i) ||
-        trimmed.match(/\b[A-Z]{2,5}\/\d{4}\/\d{2,6}\b/i);
-      if (match) {
-        suggestedRegNumber = match[0].toUpperCase();
+      const match = findKenyanRegMatch(trimmed);
+      if (match?.[0]) {
+        suggestedRegNumber = match[0].replace(/\s+/g, '').toUpperCase();
       }
     }
 

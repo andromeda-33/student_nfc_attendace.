@@ -15,6 +15,15 @@ class AttendanceStorage(context: Context) {
     private val KEY_RECORDS = "key_records_v2"
     private val KEY_CUSTOM_COURSES = "key_custom_courses_v2"
 
+    @Volatile
+    private var cachedStudents: List<Student>? = null
+    @Volatile
+    private var cachedSessions: List<AttendanceSession>? = null
+    @Volatile
+    private var cachedRecords: List<AttendanceRecord>? = null
+    @Volatile
+    private var cachedCustomCourses: List<CustomCourse>? = null
+
     init {
         val dekut = KenyanUniversities.getById(KenyanUniversities.DEFAULT_UNIVERSITY_ID)
 
@@ -131,15 +140,25 @@ class AttendanceStorage(context: Context) {
     }
 
     // --- Students ---
+    @Synchronized
     fun getStudents(): List<Student> {
-        val json = prefs.getString(KEY_STUDENTS, null) ?: return emptyList()
-        val type = object : TypeToken<List<Student>>() {}.type
-        return gson.fromJson(json, type) ?: emptyList()
+        cachedStudents?.let { return it }
+        val json = prefs.getString(KEY_STUDENTS, null)
+        val list: List<Student> = if (json == null) {
+            emptyList()
+        } else {
+            val type = object : TypeToken<List<Student>>() {}.type
+            gson.fromJson(json, type) ?: emptyList()
+        }
+        cachedStudents = list
+        return list
     }
 
     @Synchronized
     fun saveStudents(students: List<Student>) {
-        prefs.edit().putString(KEY_STUDENTS, gson.toJson(students)).apply()
+        val snapshot = students.toList()
+        cachedStudents = snapshot
+        prefs.edit().putString(KEY_STUDENTS, gson.toJson(snapshot)).apply()
     }
 
     fun findStudentByCardUid(cardUid: String): Student? {
@@ -249,15 +268,25 @@ class AttendanceStorage(context: Context) {
     }
 
     // --- Custom Courses ---
+    @Synchronized
     fun getCustomCourses(): List<CustomCourse> {
-        val json = prefs.getString(KEY_CUSTOM_COURSES, null) ?: return emptyList()
-        val type = object : TypeToken<List<CustomCourse>>() {}.type
-        return gson.fromJson(json, type) ?: emptyList()
+        cachedCustomCourses?.let { return it }
+        val json = prefs.getString(KEY_CUSTOM_COURSES, null)
+        val list: List<CustomCourse> = if (json == null) {
+            emptyList()
+        } else {
+            val type = object : TypeToken<List<CustomCourse>>() {}.type
+            gson.fromJson(json, type) ?: emptyList()
+        }
+        cachedCustomCourses = list
+        return list
     }
 
     @Synchronized
     fun saveCustomCourses(courses: List<CustomCourse>) {
-        prefs.edit().putString(KEY_CUSTOM_COURSES, gson.toJson(courses)).apply()
+        val snapshot = courses.toList()
+        cachedCustomCourses = snapshot
+        prefs.edit().putString(KEY_CUSTOM_COURSES, gson.toJson(snapshot)).apply()
     }
 
     fun addCustomCourse(course: CustomCourse): CustomCourse {
@@ -279,15 +308,25 @@ class AttendanceStorage(context: Context) {
     }
 
     // --- Sessions ---
+    @Synchronized
     fun getSessions(): List<AttendanceSession> {
-        val json = prefs.getString(KEY_SESSIONS, null) ?: return emptyList()
-        val type = object : TypeToken<List<AttendanceSession>>() {}.type
-        return gson.fromJson(json, type) ?: emptyList()
+        cachedSessions?.let { return it }
+        val json = prefs.getString(KEY_SESSIONS, null)
+        val list: List<AttendanceSession> = if (json == null) {
+            emptyList()
+        } else {
+            val type = object : TypeToken<List<AttendanceSession>>() {}.type
+            gson.fromJson(json, type) ?: emptyList()
+        }
+        cachedSessions = list
+        return list
     }
 
     @Synchronized
     fun saveSessions(sessions: List<AttendanceSession>) {
-        prefs.edit().putString(KEY_SESSIONS, gson.toJson(sessions)).apply()
+        val snapshot = sessions.toList()
+        cachedSessions = snapshot
+        prefs.edit().putString(KEY_SESSIONS, gson.toJson(snapshot)).apply()
     }
 
     fun addSession(session: AttendanceSession) {
@@ -322,15 +361,25 @@ class AttendanceStorage(context: Context) {
     }
 
     // --- Attendance Records ---
+    @Synchronized
     fun getRecords(): List<AttendanceRecord> {
-        val json = prefs.getString(KEY_RECORDS, null) ?: return emptyList()
-        val type = object : TypeToken<List<AttendanceRecord>>() {}.type
-        return gson.fromJson(json, type) ?: emptyList()
+        cachedRecords?.let { return it }
+        val json = prefs.getString(KEY_RECORDS, null)
+        val list: List<AttendanceRecord> = if (json == null) {
+            emptyList()
+        } else {
+            val type = object : TypeToken<List<AttendanceRecord>>() {}.type
+            gson.fromJson(json, type) ?: emptyList()
+        }
+        cachedRecords = list
+        return list
     }
 
     @Synchronized
     fun saveRecords(records: List<AttendanceRecord>) {
-        prefs.edit().putString(KEY_RECORDS, gson.toJson(records)).apply()
+        val snapshot = records.toList()
+        cachedRecords = snapshot
+        prefs.edit().putString(KEY_RECORDS, gson.toJson(snapshot)).apply()
     }
 
     fun getRecordsForSession(sessionId: String, weekNumber: Int? = null): List<AttendanceRecord> {

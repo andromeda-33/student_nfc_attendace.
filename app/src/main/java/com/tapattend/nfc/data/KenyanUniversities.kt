@@ -327,26 +327,44 @@ object KenyanUniversities {
         KenyanUniversity("kabarak", "KABARAK UNIVERSITY", "KABU", "Nakuru, Kenya", "Education in Biblical Perspective", 0xFF6B1D2F, 0xFFD4AF37, 0xFF1E293B, allKenyanDepartments)
     )
 
+    private val uniqueDepartments: List<PresetDepartment> by lazy {
+        (dekutDepartments + allKenyanDepartments).distinctBy { it.name.lowercase() }
+    }
+
+    private val codeToDepartmentMap: Map<String, String> by lazy {
+        val map = mutableMapOf<String, String>()
+        for (dept in uniqueDepartments) {
+            for (course in dept.courses) {
+                map.putIfAbsent(course.code.trim().uppercase(), dept.name)
+            }
+        }
+        map
+    }
+
+    private val exactCourseToDepartmentMap: Map<String, String> by lazy {
+        val map = mutableMapOf<String, String>()
+        for (dept in uniqueDepartments) {
+            for (course in dept.courses) {
+                map.putIfAbsent(course.name.trim().lowercase(), dept.name)
+            }
+        }
+        map
+    }
+
     fun getById(id: String?): KenyanUniversity {
         return list.find { it.id == id } ?: list.first()
     }
 
     fun inferDepartmentFromCourse(courseName: String?, courseCode: String? = null): String? {
         if (!courseCode.isNullOrBlank()) {
-            for (uni in list) {
-                for (dept in uni.departments) {
-                    if (dept.courses.any { it.code.equals(courseCode.trim(), ignoreCase = true) }) {
-                        return dept.name
-                    }
-                }
-            }
+            codeToDepartmentMap[courseCode.trim().uppercase()]?.let { return it }
         }
         if (!courseName.isNullOrBlank()) {
-            for (uni in list) {
-                for (dept in uni.departments) {
-                    if (dept.courses.any { CourseMatcher.isCourseMatch(it.name, courseName) }) {
-                        return dept.name
-                    }
+            val clean = courseName.trim().lowercase()
+            exactCourseToDepartmentMap[clean]?.let { return it }
+            for (dept in uniqueDepartments) {
+                if (dept.courses.any { CourseMatcher.isCourseMatch(it.name, courseName) }) {
+                    return dept.name
                 }
             }
         }
@@ -427,46 +445,84 @@ object CourseMatcher {
         "bsc", "btech", "beng", "bed", "bcom", "bba", "ba", "llb", "diploma", "certificate", "degree"
     )
 
+    private val REGEX_PUNCT = Regex("""[.,()/\\:\-_]+""")
+    private val REGEX_BSC = Regex("""\bbachelor\s+of\s+science\b""")
+    private val REGEX_BTECH = Regex("""\bbachelor\s+of\s+technology\b""")
+    private val REGEX_BENG = Regex("""\bbachelor\s+of\s+engineering\b""")
+    private val REGEX_BED = Regex("""\bbachelor\s+of\s+education\b""")
+    private val REGEX_BCOM = Regex("""\bbachelor\s+of\s+commerce\b""")
+    private val REGEX_BBA = Regex("""\bbachelor\s+of\s+business\s+administration\b""")
+    private val REGEX_BA = Regex("""\bbachelor\s+of\s+arts\b""")
+    private val REGEX_LLB = Regex("""\bbachelor\s+of\s+laws\b""")
+    private val REGEX_B_SC = Regex("""\bb\s+sc\b""")
+    private val REGEX_B_TECH = Regex("""\bb\s+tech\b""")
+    private val REGEX_B_ENG = Regex("""\bb\s+eng\b""")
+    private val REGEX_B_ED = Regex("""\bb\s+ed\b""")
+    private val REGEX_B_COM = Regex("""\bb\s+com\b""")
+    private val REGEX_B_A = Regex("""\bb\s+a\b""")
+    private val REGEX_ELEC = Regex("""\belectronics\b""")
+    private val REGEX_TELE = Regex("""\btelecommunications\b""")
+    private val REGEX_MECH = Regex("""\bmechatronics\b""")
+    private val REGEX_SCI = Regex("""\bsciences\b""")
+    private val REGEX_SYS = Regex("""\bsystems\b""")
+    private val REGEX_TECHS = Regex("""\btechnologies\b""")
+    private val REGEX_COMP = Regex("""\bcomputers\b""")
+    private val REGEX_TYPO_ENG = Regex("""\b(?:enginering|engeneering)\b""")
+    private val REGEX_TYPO_TECH = Regex("""\b(?:techonology|tecnology)\b""")
+    private val REGEX_SPACES = Regex("""\s+""")
+
+    private val normCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val tokenCache = java.util.concurrent.ConcurrentHashMap<String, List<String>>()
+
     private fun normalizeBase(raw: String): String {
-        var s = raw.lowercase()
-        s = s.replace("&", " and ")
-            .replace(Regex("""[.,()/\\:\-_]+"""), " ")
-            .replace(Regex("""\bbachelor\s+of\s+science\b"""), "bsc")
-            .replace(Regex("""\bbachelor\s+of\s+technology\b"""), "btech")
-            .replace(Regex("""\bbachelor\s+of\s+engineering\b"""), "beng")
-            .replace(Regex("""\bbachelor\s+of\s+education\b"""), "bed")
-            .replace(Regex("""\bbachelor\s+of\s+commerce\b"""), "bcom")
-            .replace(Regex("""\bbachelor\s+of\s+business\s+administration\b"""), "bba")
-            .replace(Regex("""\bbachelor\s+of\s+arts\b"""), "ba")
-            .replace(Regex("""\bbachelor\s+of\s+laws\b"""), "llb")
-            .replace(Regex("""\bb\s+sc\b"""), "bsc")
-            .replace(Regex("""\bb\s+tech\b"""), "btech")
-            .replace(Regex("""\bb\s+eng\b"""), "beng")
-            .replace(Regex("""\bb\s+ed\b"""), "bed")
-            .replace(Regex("""\bb\s+com\b"""), "bcom")
-            .replace(Regex("""\bb\s+a\b"""), "ba")
-            .replace(Regex("""\belectronics\b"""), "electronic")
-            .replace(Regex("""\btelecommunications\b"""), "telecommunication")
-            .replace(Regex("""\bmechatronics\b"""), "mechatronic")
-            .replace(Regex("""\bsciences\b"""), "science")
-            .replace(Regex("""\bsystems\b"""), "system")
-            .replace(Regex("""\btechnologies\b"""), "technology")
-            .replace(Regex("""\bcomputers\b"""), "computer")
-            .replace(Regex("""\benginering\b|\bengeneering\b"""), "engineering")
-            .replace(Regex("""\btechonology\b|\btecnology\b"""), "technology")
-            .replace(Regex("""\s+"""), " ")
-            .trim()
-        return s
+        val key = raw.trim().lowercase()
+        normCache[key]?.let { return it }
+
+        val normalized = REGEX_SPACES.replace(
+            key.replace("&", " and ")
+                .replace(REGEX_PUNCT, " ")
+                .replace(REGEX_BSC, "bsc")
+                .replace(REGEX_BTECH, "btech")
+                .replace(REGEX_BENG, "beng")
+                .replace(REGEX_BED, "bed")
+                .replace(REGEX_BCOM, "bcom")
+                .replace(REGEX_BBA, "bba")
+                .replace(REGEX_BA, "ba")
+                .replace(REGEX_LLB, "llb")
+                .replace(REGEX_B_SC, "bsc")
+                .replace(REGEX_B_TECH, "btech")
+                .replace(REGEX_B_ENG, "beng")
+                .replace(REGEX_B_ED, "bed")
+                .replace(REGEX_B_COM, "bcom")
+                .replace(REGEX_B_A, "ba")
+                .replace(REGEX_ELEC, "electronic")
+                .replace(REGEX_TELE, "telecommunication")
+                .replace(REGEX_MECH, "mechatronic")
+                .replace(REGEX_SCI, "science")
+                .replace(REGEX_SYS, "system")
+                .replace(REGEX_TECHS, "technology")
+                .replace(REGEX_COMP, "computer")
+                .replace(REGEX_TYPO_ENG, "engineering")
+                .replace(REGEX_TYPO_TECH, "technology"),
+            " "
+        ).trim()
+        if (normCache.size < 512) normCache[key] = normalized
+        return normalized
     }
 
     private fun extractCoreTokens(raw: String): List<String> {
+        val key = raw.trim().lowercase()
+        tokenCache[key]?.let { return it }
+
         val baseWords = normalizeBase(raw)
             .split(" ")
             .map { it.trim() }
             .filter { it.length >= 2 }
             .distinct()
         val nonStop = baseWords.filter { it !in STOP_WORDS }
-        return if (nonStop.isNotEmpty()) nonStop else baseWords
+        val result = if (nonStop.isNotEmpty()) nonStop else baseWords
+        if (tokenCache.size < 512) tokenCache[key] = result
+        return result
     }
 
     private fun levenshtein(a: String, b: String): Int {

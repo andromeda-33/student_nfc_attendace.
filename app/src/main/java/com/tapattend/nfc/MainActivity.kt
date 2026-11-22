@@ -21,9 +21,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
 import com.tapattend.nfc.data.*
 import com.tapattend.nfc.nfc.NfcHelper
 import com.tapattend.nfc.ui.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class AppScreen {
     HOME,
@@ -48,6 +52,8 @@ class MainActivity : ComponentActivity() {
     private var inspectedCardData by mutableStateOf<ParsedCardData?>(null)
     private var showExportFormatDialog by mutableStateOf(false)
     private var refreshTrigger by mutableIntStateOf(0)
+    @Volatile
+    private var isReadingNfc = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -298,52 +304,86 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     private fun handleNfcIntent(intent: Intent) {
         val action = intent.action ?: return
-        if (action == NfcAdapter.ACTION_TAG_DISCOVERED ||
-            action == NfcAdapter.ACTION_TECH_DISCOVERED ||
-            action == NfcAdapter.ACTION_NDEF_DISCOVERED
+        if (action != NfcAdapter.ACTION_TAG_DISCOVERED &&
+            action != NfcAdapter.ACTION_TECH_DISCOVERED &&
+            action != NfcAdapter.ACTION_NDEF_DISCOVERED
         ) {
-            val tag = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
-            } else {
-                intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
-            } ?: return
-
-            val parsedData = nfcHelper.parseStudentCard(tag, intent)
-            lastScannedUid = parsedData.cardUid
-
-            if (showCardInspector) {
-                inspectedCardData = parsedData
-                if (parsedData.hasLocalStudentData || !parsedData.ndefText.isNullOrBlank()) {
-                    nfcHelper.playSuccessFeedback()
-                    Toast.makeText(this, "Local card data read: ${parsedData.memorySource}", Toast.LENGTH_SHORT).show()
-                } else {
-                    nfcHelper.playDuplicateWarningFeedback()
-                    Toast.makeText(this, "Card UID read (${parsedData.cardUid}) — memory locked/empty", Toast.LENGTH_SHORT).show()
-                }
-                return
-            }
-
-            processCardData(parsedData)
-        }
-    }
-
-    private fun processCardData(cardData: ParsedCardData) {
-        val session = activeSession
-        val cardUid = cardData.cardUid
-
-        if (session == null || currentScreen != AppScreen.LIVE_SCAN) {
-            val summary = if (cardData.hasLocalStudentData) {
-                "Read locally: ${cardData.suggestedName} (${cardData.suggestedRegNumber})"
-            } else {
-                "NFC Card Scanned: $cardUid"
-            }
-            Toast.makeText(this, summary, Toast.LENGTH_SHORT).show()
             return
         }
 
-        val weekNum = if (session.isMultiSession()) activeWeek else null
-        val result = storage.recordTapForSession(session, cardUid, weekNum)
-        handleRecordResult(result, cardData)
+        val tag = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
+        } else {
+            intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
+        } ?: return
+
+        if (isReadingNfc) return
+        isReadingNfc = true
+
+        val inInspector = showCardInspector
+        val session = activeSession
+        val screen = currentScreen
+        val weekNum = if (session?.isMultiSession() == true) activeWeek else null
+
+        lifecycleScope.launch {
+            try {
+                val (parsedData, tapResult) = withContext<Pair<ParsedCardData, AttendanceStorage.RecordResult?>>(Dispatchers.IO) {
+                    val parsed = nfcHelper.parseStudentCard(tag, intent, quickMode = !inInspector)
+                    if (inInspector || session == null || screen != AppScreen.LIVE_SCAN) {
+                        Pair(parsed, null)
+                    } else {
+                        val initialRes = storage.recordTapForSession(session, parsed.cardUid, weekNum)
+                        val finalRes = if (initialRes is AttendanceStorage.RecordResult.UnknownCard && parsed.hasLocalStudentData) {
+                            storage.enrollAndRecordTap(
+                                session = session,
+                                cardUid = parsed.cardUid,
+                                weekNumber = weekNum,
+                                newRegNumber = parsed.suggestedRegNumber,
+                                newFullName = parsed.suggestedName,
+                                universityId = session.universityId,
+                                universityName = session.universityName,
+                                department = parsed.suggestedDepartment ?: session.department,
+                                courseCode = parsed.suggestedCourseCode ?: session.courseCode,
+                                courseName = parsed.suggestedCourse ?: session.allowedCourses.firstOrNull() ?: "General Programme"
+                            )
+                        } else {
+                            initialRes
+                        }
+                        Pair(parsed, finalRes)
+                    }
+                }
+
+                lastScannedUid = parsedData.cardUid
+
+                if (inInspector) {
+                    inspectedCardData = parsedData
+                    if (parsedData.hasLocalStudentData || !parsedData.ndefText.isNullOrBlank()) {
+                        nfcHelper.playSuccessFeedback()
+                        Toast.makeText(this@MainActivity, "Local card data read: ${parsedData.memorySource}", Toast.LENGTH_SHORT).show()
+                    } else {
+                        nfcHelper.playDuplicateWarningFeedback()
+                        Toast.makeText(this@MainActivity, "Card UID read (${parsedData.cardUid}) — memory locked/empty", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
+                if (session == null || screen != AppScreen.LIVE_SCAN) {
+                    val summary = if (parsedData.hasLocalStudentData) {
+                        "Read locally: ${parsedData.suggestedName} (${parsedData.suggestedRegNumber})"
+                    } else {
+                        "NFC Card Scanned: ${parsedData.cardUid}"
+                    }
+                    Toast.makeText(this@MainActivity, summary, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                if (tapResult != null) {
+                    handleRecordResult(tapResult, parsedData, allowAutoEnrollFromCard = false)
+                }
+            } finally {
+                isReadingNfc = false
+            }
+        }
     }
 
     private fun handleRecordResult(
