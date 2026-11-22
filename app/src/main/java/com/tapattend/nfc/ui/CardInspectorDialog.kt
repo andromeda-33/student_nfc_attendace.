@@ -24,9 +24,7 @@ import com.tapattend.nfc.data.ParsedCardData
 @Composable
 fun CardInspectorDialog(
     inspectedCard: ParsedCardData?,
-    onSimulateLocalCard: () -> Unit,
     onClear: () -> Unit,
-    onSendToRegistration: (ParsedCardData) -> Unit,
     onDismiss: () -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -61,7 +59,7 @@ fun CardInspectorDialog(
                         Column {
                             Text("Local NFC Card Inspector", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             Text(
-                                "Reads NDEF, MIFARE & IsoDep without any DB",
+                                "Reads NDEF, MIFARE & IsoDep directly off card",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -82,37 +80,28 @@ fun CardInspectorDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp),
+                            modifier = Modifier.padding(18.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(
                                 Icons.Default.Contactless,
                                 contentDescription = null,
                                 tint = Color(0xFF7C3AED),
-                                modifier = Modifier.size(44.dp)
+                                modifier = Modifier.size(48.dp)
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
-                                "Tap Student ID Card to Test Local Read",
+                                "Hold Physical Student ID Card to Phone",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = Color(0xFF4C1D95)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                "This scanner probes NDEF records, MIFARE Classic default-key sectors, MIFARE Ultralight pages, and IsoDep SmartCard bytes to check if Name, Reg No, Course & Department are readable directly from the card.",
+                                "Reads NDEF records, MIFARE Classic sectors (stitched multi-block fields), MIFARE Ultralight pages, and IsoDep bytes completely offline with zero database needed.",
                                 fontSize = 11.sp,
                                 color = Color(0xFF5B21B6)
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            OutlinedButton(
-                                onClick = onSimulateLocalCard,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.TouchApp, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Simulate Local Card Payload", fontSize = 12.sp)
-                            }
                         }
                     }
                 } else {
@@ -160,7 +149,6 @@ fun CardInspectorDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Parsed Student Fields
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -177,7 +165,6 @@ fun CardInspectorDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Raw Diagnostic Memory Dump
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -224,13 +211,9 @@ fun CardInspectorDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = onDismiss) { Text("Close") }
+                        TextButton(onClick = onClear) { Text("Scan Another") }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Button(onClick = { onSendToRegistration(inspectedCard) }) {
-                            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Register / Save", fontSize = 12.sp)
-                        }
+                        Button(onClick = onDismiss) { Text("Done") }
                     }
                 }
             }

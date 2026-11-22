@@ -6,8 +6,6 @@ import {
   ExternalLink,
   Nfc,
   Smartphone,
-  Touchpad,
-  UserPlus,
   X,
 } from 'lucide-react';
 import { ParsedCardData } from '../types/tapattend';
@@ -16,18 +14,15 @@ import {
   decodeWebNdefReading,
   formatWebNfcError,
   isEmbeddedIframe,
-  parseTextIntoCardData,
   WebNdefReadingEventLike,
 } from '../utils/nfcParser';
 
 interface CardInspectorModalProps {
   onDismiss: () => void;
-  onSendToRegistration: (parsed: ParsedCardData) => void;
 }
 
 export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
   onDismiss,
-  onSendToRegistration,
 }) => {
   const [inspectedCard, setInspectedCard] = useState<ParsedCardData | null>(null);
   const [webNfcListening, setWebNfcListening] = useState(false);
@@ -51,7 +46,7 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
 
     if (!win.NDEFReader) {
       setNfcNote(
-        'Web NFC is only available in Android Chrome. On desktop or to test full MIFARE/IsoDep chip probing, use Simulate Local Card or the Android APK.'
+        'Web NFC is only available in Android Chrome. For full MIFARE Classic sector reading (like DeKUT student IDs), use the Android APK.'
       );
       return;
     }
@@ -94,31 +89,6 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
     }
   };
 
-  const handleSimulateLocalCard = () => {
-    const fakeUid =
-      '04' +
-      Math.floor(0x10000000 + Math.random() * 0xefffffff)
-        .toString(16)
-        .toUpperCase();
-    const samplePayload = [
-      'Name: Faith Nyambura',
-      'Reg: C026-01-1142/2023',
-      'Department: Department of Computer Science',
-      'Course: B.Sc. Computer Science',
-    ].join('\n');
-
-    const parsed = parseTextIntoCardData(fakeUid, samplePayload, {
-      techList: ['NfcA', 'MifareUltralight', 'NDEF'],
-      memorySource: 'Simulated Local NDEF Payload',
-      rawDump: `Card UID: ${fakeUid}\nTechnologies: NfcA, MifareUltralight, NDEF\n\n${samplePayload}`,
-    });
-    playSuccessChime();
-    setInspectedCard(parsed);
-    setNfcNote(
-      'Simulated local NDEF card payload decoded without any database lookup.'
-    );
-  };
-
   const statusStyle = !inspectedCard
     ? ''
     : inspectedCard.hasLocalStudentData
@@ -148,7 +118,7 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
                 Local NFC Card Inspector
               </h2>
               <p className="text-xs text-slate-500">
-                Tests reading Name, Reg No, Dept &amp; Course locally with zero DB
+                Reads Name, Reg No, Dept &amp; Course directly off the card
               </p>
             </div>
           </div>
@@ -169,8 +139,7 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
               <p className="leading-relaxed text-amber-900">
                 Chrome restricts <span className="font-mono">NDEFReader</span> inside
                 embedded iframes. Open this app directly in a standalone Android Chrome
-                tab, or install the built Android APK (which also probes MIFARE &amp;
-                IsoDep chips).
+                tab, or install the Android APK (which reads raw MIFARE Classic sectors).
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <a
@@ -214,20 +183,19 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
               </div>
               <div>
                 <h3 className="text-sm font-bold text-violet-950">
-                  Tap Student ID Card to Test Local Chip Read
+                  Tap Student ID Card to Read Chip Data
                 </h3>
                 <p className="text-xs text-violet-800/80 mt-1 leading-relaxed">
-                  Unencrypted NDEF or open-key MIFARE data is decoded directly from the
-                  card. Encrypted university smart cards only expose their UID unless read
-                  with institutional keys. (The Android APK probes NDEF, MIFARE Classic,
-                  Ultralight &amp; IsoDep.)
+                  Decodes student fields directly from NFC card memory with zero database
+                  lookup. (Android Chrome supports NDEF; the Android APK also reads raw
+                  MIFARE Classic blocks.)
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => void handleStartWebNfc()}
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer ${
                     webNfcListening
                       ? 'bg-emerald-600 text-white'
                       : 'bg-violet-600 hover:bg-violet-700 text-white'
@@ -235,16 +203,8 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
                 >
                   <Smartphone className="w-3.5 h-3.5" />
                   <span>
-                    {webNfcListening ? 'Web NFC Listening...' : 'Scan via Web NFC'}
+                    {webNfcListening ? 'Web NFC Listening...' : 'Scan Physical Card (Web NFC)'}
                   </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSimulateLocalCard}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
-                >
-                  <Touchpad className="w-3.5 h-3.5" />
-                  <span>Simulate Local Card Payload</span>
                 </button>
               </div>
             </div>
@@ -326,23 +286,22 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
         </div>
 
         <div className="px-5 py-3.5 border-t border-slate-200 flex items-center justify-end gap-2 bg-slate-50">
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/70 cursor-pointer"
-          >
-            Close
-          </button>
           {inspectedCard && (
             <button
               type="button"
-              onClick={() => onSendToRegistration(inspectedCard)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold cursor-pointer"
+              onClick={() => setInspectedCard(null)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-violet-700 hover:bg-violet-50 cursor-pointer"
             >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Register / Save to DB</span>
+              Scan Another
             </button>
           )}
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="px-4 py-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold cursor-pointer"
+          >
+            Done
+          </button>
         </div>
       </div>
     </div>

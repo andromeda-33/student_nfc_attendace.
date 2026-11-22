@@ -1,4 +1,7 @@
-import { KENYAN_UNIVERSITIES } from '../data/kenyanUniversities';
+import {
+  inferDepartmentFromCourse,
+  KENYAN_UNIVERSITIES,
+} from '../data/kenyanUniversities';
 import { ParsedCardData } from '../types/tapattend';
 import { normalizeUid } from './storage';
 
@@ -45,21 +48,30 @@ function isLikelyCourse(token: string): boolean {
     l.startsWith('bachelor') ||
     l.startsWith('b.tech') ||
     l.startsWith('b.ed') ||
+    l.startsWith('b.com') ||
+    l.startsWith('b.a') ||
     l.startsWith('diploma') ||
+    l.startsWith('certificate') ||
     l.includes('engineering') ||
     l.includes('computer science') ||
-    l.includes('information technology')
+    l.includes('information technology') ||
+    l.includes('actuarial') ||
+    l.includes('commerce') ||
+    l.includes('economics') ||
+    l.includes('nursing') ||
+    l.includes('medicine') ||
+    l.includes('education')
   );
 }
 
 function isLikelyFullName(token: string): boolean {
-  if (token.length < 4 || token.length > 60) return false;
+  if (token.length < 4 || token.length > 64) return false;
   if (/\d/.test(token)) return false;
   if (isLikelyDepartment(token) || isLikelyCourse(token)) return false;
   const words = token.split(/\s+/).filter(Boolean);
   return (
     words.length >= 2 &&
-    words.length <= 5 &&
+    words.length <= 6 &&
     words.every((w) => /^[A-Za-z'.-]+$/.test(w))
   );
 }
@@ -170,7 +182,7 @@ export function parseTextIntoCardData(
     }
 
     // 3. Fallback delimited tokens (pipe, tab, newline, comma, semicolon)
-    if (!suggestedRegNumber || !suggestedName) {
+    if (!suggestedRegNumber || !suggestedName || !suggestedCourse) {
       const tokens = trimmed
         .split(/[|\t\n,;]+/)
         .map((t) => t.trim())
@@ -199,27 +211,33 @@ export function parseTextIntoCardData(
       }
     }
 
-    // 5. Auto-infer Kenyan University Department & Course from reg number prefix (e.g. C026 -> B.Sc. Computer Science)
-    if (suggestedRegNumber && (!suggestedCourse || !suggestedDepartment)) {
-      const prefixMatch = suggestedRegNumber.match(/^[A-Z]+\d+/);
-      const prefix = prefixMatch?.[0];
-      if (prefix) {
-        for (const uni of KENYAN_UNIVERSITIES) {
-          let found = false;
-          for (const dept of uni.departments) {
-            const matchedCourse = dept.courses.find(
-              (c) => c.code.toUpperCase() === prefix.toUpperCase()
-            );
-            if (matchedCourse) {
-              if (!suggestedDepartment) suggestedDepartment = dept.name;
-              if (!suggestedCourse) suggestedCourse = matchedCourse.name;
-              if (!suggestedCourseCode) suggestedCourseCode = matchedCourse.code;
-              found = true;
-              break;
-            }
+    // 5. Extract prefix code & infer Department & Course from Kenyan catalog
+    if (!suggestedCourseCode && suggestedRegNumber) {
+      suggestedCourseCode = suggestedRegNumber.trim().match(/^[A-Z]+\d+/)?.[0];
+    }
+
+    if (!suggestedDepartment) {
+      suggestedDepartment = inferDepartmentFromCourse(
+        suggestedCourse,
+        suggestedCourseCode
+      );
+    }
+
+    if (!suggestedCourse && suggestedCourseCode) {
+      for (const uni of KENYAN_UNIVERSITIES) {
+        let found = false;
+        for (const dept of uni.departments) {
+          const matchedCourse = dept.courses.find(
+            (c) => c.code.toUpperCase() === suggestedCourseCode?.toUpperCase()
+          );
+          if (matchedCourse) {
+            suggestedCourse = matchedCourse.name;
+            if (!suggestedDepartment) suggestedDepartment = dept.name;
+            found = true;
+            break;
           }
-          if (found) break;
         }
+        if (found) break;
       }
     }
   }

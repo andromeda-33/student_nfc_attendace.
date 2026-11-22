@@ -40,15 +40,19 @@ fun LiveScanScreen(
     students: List<Student>,
     customCourses: List<CustomCourse>,
     selectedWeek: Int,
-    isSyncing: Boolean,
     onWeekChanged: (Int) -> Unit,
     onBack: () -> Unit,
     onOpenMatrix: () -> Unit,
-    onUpdateDatabase: () -> Unit,
     onExport: () -> Unit,
     lastScannedResult: ScanBannerState?,
     onManualCheckIn: (Student) -> Unit,
-    onSimulateScan: () -> Unit,
+    onFastManualCheckIn: (
+        regNumber: String,
+        fullName: String,
+        courseName: String,
+        department: String,
+        customValues: Map<String, String>
+    ) -> Unit,
     pendingCardToEnroll: ParsedCardData?,
     onDismissEnrollDialog: () -> Unit,
     onSaveAndEnrollTap: (
@@ -71,14 +75,18 @@ fun LiveScanScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(session.courseCode, fontWeight = FontWeight.Bold, maxLines = 1)
-                        Text(
-                            "${session.universityName} • ${session.title}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        UniversityCrestBadge(universityId = session.universityId, size = 32.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(session.courseCode, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text(
+                                "${session.universityName} • ${session.title}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -87,13 +95,6 @@ fun LiveScanScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onUpdateDatabase, enabled = !isSyncing) {
-                        Icon(
-                            Icons.Default.Sync,
-                            contentDescription = "Update Roster",
-                            tint = if (isSyncing) Color.Gray else MaterialTheme.colorScheme.primary
-                        )
-                    }
                     if (session.isMultiSession()) {
                         IconButton(onClick = onOpenMatrix) {
                             Icon(Icons.Default.GridOn, contentDescription = "Matrix View")
@@ -113,7 +114,6 @@ fun LiveScanScreen(
                 .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Course Enforcement Strip
             if (session.allowedCourses.isNotEmpty()) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -132,7 +132,6 @@ fun LiveScanScreen(
                 }
             }
 
-            // Multi-session active column picker
             if (session.isMultiSession()) {
                 Row(
                     modifier = Modifier
@@ -179,7 +178,6 @@ fun LiveScanScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // NFC Tap Zone & Pulse Indicator
             val isSuccess = lastScannedResult?.status?.startsWith("VERIFIED") == true
             val isDuplicate = lastScannedResult?.status?.startsWith("ALREADY") == true
             val isWrongCourse = lastScannedResult?.status?.startsWith("WRONG_COURSE") == true
@@ -230,7 +228,7 @@ fun LiveScanScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                "Hold student card to back of phone",
+                "Tap student ID card to back of phone",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -250,7 +248,6 @@ fun LiveScanScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Wrong Course Rejection Alert Banner
             if (isWrongCourse && lastScannedResult?.blockedStudent != null) {
                 val blocked = lastScannedResult.blockedStudent
                 Card(
@@ -280,7 +277,7 @@ fun LiveScanScreen(
                                 color = Color(0xFF991B1B)
                             )
                             Text(
-                                "Registered in: ${blocked.courseName}",
+                                "Card course: ${blocked.courseName}",
                                 fontSize = 11.sp,
                                 color = Color(0xFFB91C1C)
                             )
@@ -295,7 +292,6 @@ fun LiveScanScreen(
                 Spacer(modifier = Modifier.height(6.dp))
             }
 
-            // Last Scanned Verified / Duplicate Result Banner
             if (lastScannedResult?.record != null) {
                 val record = lastScannedResult.record
                 Card(
@@ -345,33 +341,17 @@ fun LiveScanScreen(
                 Spacer(modifier = Modifier.height(6.dp))
             }
 
-            // Action Row: Manual Entry & Simulate Tap
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+            Button(
+                onClick = { showManualDialog = true },
+                modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedButton(
-                    onClick = { showManualDialog = true },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Manual Entry", fontSize = 13.sp)
-                }
+                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                FilledTonalButton(
-                    onClick = onSimulateScan,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.TouchApp, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Simulate Tap", fontSize = 13.sp)
-                }
+                Text("Fast Manual Check-In (Name & Reg No)", fontSize = 13.sp)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Live Roll Call List
             Text(
                 "Live Roll Call (${records.size})",
                 style = MaterialTheme.typography.titleSmall,
@@ -427,11 +407,16 @@ fun LiveScanScreen(
 
     if (showManualDialog) {
         ManualCheckInDialog(
+            session = session,
             students = students,
             alreadyPresentUids = records.map { it.studentCardUid.replace(":", "").uppercase() }.toSet(),
             alreadyPresentRegs = records.map { it.regNumber.trim().uppercase() }.toSet(),
             onDismiss = { showManualDialog = false },
-            onSelect = {
+            onFastCheckIn = { reg, name, course, dept, customVals ->
+                onFastManualCheckIn(reg, name, course, dept, customVals)
+                showManualDialog = false
+            },
+            onSelectExisting = {
                 onManualCheckIn(it)
                 showManualDialog = false
             }
@@ -495,7 +480,7 @@ fun QuickEnrollOnTapDialog(
     }
     var selectedCourse by remember {
         val matched = cardData.suggestedCourse?.let { sc ->
-            sessionCourses.find { it.equals(sc, ignoreCase = true) }
+            sessionCourses.find { CourseMatcher.isCourseMatch(it, sc) }
         }
         mutableStateOf(matched ?: sessionCourses.first())
     }
@@ -526,7 +511,7 @@ fun QuickEnrollOnTapDialog(
                     Icon(Icons.Default.Nfc, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
-                        Text("Unrecognized Card Detected", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("Card UID Not Mapped Yet", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text("UID: ${cardData.cardUid}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                     }
                 }
@@ -537,7 +522,7 @@ fun QuickEnrollOnTapDialog(
                     Tab(
                         selected = mode == 0,
                         onClick = { mode = 0 },
-                        text = { Text("Register to Class", fontSize = 12.sp) }
+                        text = { Text("Enter Name & Reg", fontSize = 12.sp) }
                     )
                     Tab(
                         selected = mode == 1,
@@ -549,51 +534,66 @@ fun QuickEnrollOnTapDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 if (mode == 0) {
-                    Text(
-                        "University: ${session.universityName}",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0B6623)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Department BEFORE Course
-                    OutlinedTextField(
-                        value = department,
-                        onValueChange = { department = it },
-                        label = { Text("Department (before Course)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFECFDF5),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                session.universityName,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0B6623)
+                            )
+                            Text(
+                                "Dept: $department",
+                                fontSize = 11.sp,
+                                color = Color(0xFF1E293B)
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    Box {
+                    if (sessionCourses.size == 1) {
                         OutlinedTextField(
                             value = selectedCourse,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Course (Locked to Sheet)") },
-                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
+                            label = { Text("Course (Pre-filled from Sheet)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .clickable { courseDropdownOpen = true }
-                        )
-                        DropdownMenu(
-                            expanded = courseDropdownOpen,
-                            onDismissRequest = { courseDropdownOpen = false }
-                        ) {
-                            sessionCourses.forEach { c ->
-                                DropdownMenuItem(
-                                    text = { Text(c, fontSize = 12.sp) },
-                                    onClick = {
-                                        selectedCourse = c
-                                        courseDropdownOpen = false
-                                    }
-                                )
+                    } else {
+                        Box {
+                            OutlinedTextField(
+                                value = selectedCourse,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Course (From Sheet)") },
+                                trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { courseDropdownOpen = true }
+                            )
+                            DropdownMenu(
+                                expanded = courseDropdownOpen,
+                                onDismissRequest = { courseDropdownOpen = false }
+                            ) {
+                                sessionCourses.forEach { c ->
+                                    DropdownMenuItem(
+                                        text = { Text(c, fontSize = 12.sp) },
+                                        onClick = {
+                                            selectedCourse = c
+                                            department = KenyanUniversities.inferDepartmentFromCourse(c) ?: session.department
+                                            courseDropdownOpen = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -602,8 +602,8 @@ fun QuickEnrollOnTapDialog(
                     OutlinedTextField(
                         value = regNumber,
                         onValueChange = { regNumber = it.uppercase() },
-                        label = { Text("Registration Number") },
-                        placeholder = { Text("e.g. C026-01-0123/2024") },
+                        label = { Text("Registration Number *") },
+                        placeholder = { Text("e.g. E021-01-1034/2024") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -611,8 +611,8 @@ fun QuickEnrollOnTapDialog(
                     OutlinedTextField(
                         value = fullName,
                         onValueChange = { fullName = it },
-                        label = { Text("Student Full Name") },
-                        placeholder = { Text("e.g. Jane Wambui") },
+                        label = { Text("Student Full Name *") },
+                        placeholder = { Text("e.g. Joseph Karoki Mwangi") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -686,7 +686,7 @@ fun QuickEnrollOnTapDialog(
                         onClick = {
                             val matchedCourse = uni.departments
                                 .flatMap { it.courses }
-                                .find { it.name.equals(selectedCourse, ignoreCase = true) }
+                                .find { CourseMatcher.isCourseMatch(it.name, selectedCourse) }
                             val crsCode = matchedCourse?.code ?: session.courseCode
 
                             if (mode == 0 && fullName.isNotBlank() && regNumber.isNotBlank()) {
@@ -728,12 +728,34 @@ fun QuickEnrollOnTapDialog(
 
 @Composable
 fun ManualCheckInDialog(
+    session: AttendanceSession,
     students: List<Student>,
     alreadyPresentUids: Set<String>,
     alreadyPresentRegs: Set<String>,
     onDismiss: () -> Unit,
-    onSelect: (Student) -> Unit
+    onFastCheckIn: (
+        regNumber: String,
+        fullName: String,
+        courseName: String,
+        department: String,
+        customValues: Map<String, String>
+    ) -> Unit,
+    onSelectExisting: (Student) -> Unit
 ) {
+    var tab by remember { mutableIntStateOf(0) }
+    var regNumber by remember { mutableStateOf("") }
+    var fullName by remember { mutableStateOf("") }
+
+    val sessionCourses = remember(session) {
+        if (session.allowedCourses.isNotEmpty()) session.allowedCourses else listOf("General Programme")
+    }
+    var selectedCourse by remember(session) { mutableStateOf(sessionCourses.first()) }
+    var selectedDept by remember(selectedCourse, session) {
+        mutableStateOf(KenyanUniversities.inferDepartmentFromCourse(selectedCourse) ?: session.department)
+    }
+    var courseDropdownOpen by remember { mutableStateOf(false) }
+    val customValues = remember { mutableStateMapOf<String, String>() }
+
     var query by remember { mutableStateOf("") }
     val filtered = students.filter {
         it.fullName.contains(query, ignoreCase = true) ||
@@ -741,53 +763,208 @@ fun ManualCheckInDialog(
             it.courseName.contains(query, ignoreCase = true)
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Manual Check-In") },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Search Name, Reg No or Course...") },
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Manual Check-In", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                TabRow(selectedTabIndex = tab) {
+                    Tab(
+                        selected = tab == 0,
+                        onClick = { tab = 0 },
+                        text = { Text("Quick Entry (Name & Reg)", fontSize = 11.sp) }
+                    )
+                    Tab(
+                        selected = tab == 1,
+                        onClick = { tab = 1 },
+                        text = { Text("Saved Roster", fontSize = 11.sp) }
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
-                LazyColumn(modifier = Modifier.height(250.dp)) {
-                    items(filtered) { s ->
-                        val cleanUid = s.cardUid.replace(":", "").trim().uppercase()
-                        val isPresent = (cleanUid.isNotBlank() && alreadyPresentUids.contains(cleanUid)) ||
-                            alreadyPresentRegs.contains(s.regNumber.trim().uppercase())
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(s.fullName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("${s.regNumber} • ${s.courseName}", style = MaterialTheme.typography.bodySmall)
+
+                if (tab == 0) {
+                    // Pre-filled university, department & course badge from sheet
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFF0F9FF),
+                        border = BorderStroke(1.dp, Color(0xFFBAE6FD)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "Pre-filled from Sheet",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0369A1)
+                            )
+                            Text(session.universityName, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Department: $selectedDept", fontSize = 11.sp, color = Color(0xFF334155))
+                            if (sessionCourses.size == 1) {
+                                Text("Course: $selectedCourse", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                             }
-                            if (isPresent) {
-                                Text("Present", color = Color(0xFF059669), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            } else {
-                                Button(
-                                    onClick = { onSelect(s) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text("Mark Present", fontSize = 11.sp)
+                        }
+                    }
+
+                    if (sessionCourses.size > 1) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box {
+                            OutlinedTextField(
+                                value = selectedCourse,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Course (Pick from Sheet)") },
+                                trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { courseDropdownOpen = true }
+                            )
+                            DropdownMenu(
+                                expanded = courseDropdownOpen,
+                                onDismissRequest = { courseDropdownOpen = false }
+                            ) {
+                                sessionCourses.forEach { c ->
+                                    DropdownMenuItem(
+                                        text = { Text(c, fontSize = 12.sp) },
+                                        onClick = {
+                                            selectedCourse = c
+                                            selectedDept = KenyanUniversities.inferDepartmentFromCourse(c) ?: session.department
+                                            courseDropdownOpen = false
+                                        }
+                                    )
                                 }
                             }
                         }
-                        HorizontalDivider()
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = fullName,
+                        onValueChange = { fullName = it },
+                        label = { Text("Student Full Name *") },
+                        placeholder = { Text("e.g. Joseph Karoki Mwangi") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = regNumber,
+                        onValueChange = { regNumber = it.uppercase() },
+                        label = { Text("Registration Number *") },
+                        placeholder = { Text("e.g. E021-01-1034/2024") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    if (session.customColumns.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        session.customColumns.forEach { col ->
+                            var colVal by remember { mutableStateOf("") }
+                            OutlinedTextField(
+                                value = colVal,
+                                onValueChange = {
+                                    colVal = it
+                                    customValues[col] = it
+                                },
+                                label = { Text(col, fontSize = 11.sp) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                singleLine = true
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (fullName.isNotBlank() && regNumber.isNotBlank()) {
+                                    onFastCheckIn(
+                                        regNumber.trim(),
+                                        fullName.trim(),
+                                        selectedCourse,
+                                        selectedDept,
+                                        customValues.toMap()
+                                    )
+                                }
+                            },
+                            enabled = fullName.isNotBlank() && regNumber.isNotBlank()
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Mark Present")
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text("Search Name, Reg No or Course...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LazyColumn(modifier = Modifier.height(230.dp)) {
+                        items(filtered) { s ->
+                            val cleanUid = s.cardUid.replace(":", "").trim().uppercase()
+                            val isPresent = (cleanUid.isNotBlank() && alreadyPresentUids.contains(cleanUid)) ||
+                                alreadyPresentRegs.contains(s.regNumber.trim().uppercase())
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(s.fullName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("${s.regNumber} • ${s.courseName}", style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (isPresent) {
+                                    Text("Present", color = Color(0xFF059669), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Button(
+                                        onClick = { onSelectExisting(s) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("Mark Present", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                            HorizontalDivider()
+                        }
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
         }
-    )
+    }
 }

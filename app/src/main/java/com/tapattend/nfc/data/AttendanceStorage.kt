@@ -385,6 +385,45 @@ class AttendanceStorage(context: Context) {
         return markStudentPresent(session, student, effectiveUid, weekNumber, customValues, allowCourseOverride = false)
     }
 
+    fun manualFastCheckIn(
+        session: AttendanceSession,
+        regNumber: String,
+        fullName: String,
+        courseName: String,
+        department: String,
+        weekNumber: Int? = null,
+        customValues: Map<String, String> = emptyMap()
+    ): RecordResult {
+        val cleanReg = regNumber.trim().uppercase()
+        val cleanName = fullName.trim()
+        val existing = getStudents().find { it.regNumber.equals(cleanReg, ignoreCase = true) }
+        val resolvedCourse = courseName.trim().ifBlank { session.allowedCourses.firstOrNull() ?: "General Programme" }
+        val resolvedDept = department.trim().ifBlank {
+            KenyanUniversities.inferDepartmentFromCourse(resolvedCourse) ?: session.department
+        }
+        val uni = KenyanUniversities.getById(session.universityId)
+        val matchedCode = uni.departments.flatMap { it.courses }
+            .find { CourseMatcher.isCourseMatch(it.name, resolvedCourse) }?.code
+            ?: Regex("""^[A-Z]+\d+""").find(cleanReg)?.value
+            ?: existing?.courseCode
+            ?: session.courseCode
+
+        val savedStudent = addOrUpdateStudent(
+            Student(
+                id = existing?.id ?: java.util.UUID.randomUUID().toString(),
+                cardUid = existing?.cardUid ?: "",
+                regNumber = cleanReg,
+                fullName = cleanName,
+                universityId = session.universityId,
+                universityName = session.universityName,
+                department = resolvedDept,
+                courseCode = matchedCode,
+                courseName = resolvedCourse
+            )
+        )
+        return manualCheckInStudent(session, savedStudent, weekNumber, customValues)
+    }
+
     private fun markStudentPresent(
         session: AttendanceSession,
         student: Student,
@@ -394,8 +433,8 @@ class AttendanceStorage(context: Context) {
         allowCourseOverride: Boolean
     ): RecordResult {
         if (!allowCourseOverride && session.allowedCourses.isNotEmpty()) {
-            val isAllowed = session.allowedCourses.any {
-                it.trim().equals(student.courseName.trim(), ignoreCase = true)
+            val isAllowed = session.allowedCourses.any { allowed ->
+                CourseMatcher.isCourseMatch(allowed, student.courseName)
             }
             if (!isAllowed) {
                 return RecordResult.WrongCourse(student, session.allowedCourses)
@@ -490,9 +529,9 @@ class AttendanceStorage(context: Context) {
         val allStudents = getStudents().filter { s ->
             when {
                 !filterCourse.isNullOrBlank() ->
-                    s.courseName.trim().equals(filterCourse.trim(), ignoreCase = true)
+                    CourseMatcher.isCourseMatch(filterCourse, s.courseName)
                 session.allowedCourses.isNotEmpty() ->
-                    session.allowedCourses.any { it.trim().equals(s.courseName.trim(), ignoreCase = true) }
+                    session.allowedCourses.any { CourseMatcher.isCourseMatch(it, s.courseName) }
                 else -> true
             }
         }

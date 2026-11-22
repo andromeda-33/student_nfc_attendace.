@@ -29,10 +29,7 @@ import com.tapattend.nfc.data.*
 fun StudentRosterScreen(
     students: List<Student>,
     customCourses: List<CustomCourse>,
-    isSyncing: Boolean,
     onBack: () -> Unit,
-    onUpdateDatabase: () -> Unit,
-    onOpenCardRegistration: () -> Unit,
     onAddStudent: (Student) -> Unit,
     onDeleteStudent: (Student) -> Unit,
     onImportCsv: (String, String, String, String, String) -> Unit,
@@ -53,34 +50,24 @@ fun StudentRosterScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Student Directory & Cards", fontWeight = FontWeight.Bold) },
+                title = { Text("Student Directory", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = onUpdateDatabase, enabled = !isSyncing) {
-                        Icon(
-                            Icons.Default.Sync,
-                            contentDescription = "Update Roster",
-                            tint = if (isSyncing) Color.Gray else MaterialTheme.colorScheme.primary
-                        )
-                    }
                     IconButton(onClick = { showImportDialog = true }) {
                         Icon(Icons.Default.UploadFile, contentDescription = "Import CSV Roster")
-                    }
-                    IconButton(onClick = { showAddDialog = true }) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = "Add Student Manually")
                     }
                 }
             )
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = onOpenCardRegistration,
-                icon = { Icon(Icons.Default.Nfc, contentDescription = null) },
-                text = { Text("Tap & Register Card") }
+                onClick = { showAddDialog = true },
+                icon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
+                text = { Text("Add Student") }
             )
         }
     ) { padding ->
@@ -109,7 +96,7 @@ fun StudentRosterScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Total Enrolled: ${students.size} students",
+                    "Total Saved: ${students.size} students",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -180,13 +167,6 @@ fun StudentRosterScreen(
                                         fontFamily = FontFamily.Monospace,
                                         color = MaterialTheme.colorScheme.primary
                                     )
-                                } else {
-                                    Text(
-                                        "No Card Paired (Tap card to link)",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFFF59E0B),
-                                        fontWeight = FontWeight.Medium
-                                    )
                                 }
                             }
 
@@ -233,12 +213,15 @@ fun AddStudentDialog(
     val defaultUni = KenyanUniversities.getById(KenyanUniversities.DEFAULT_UNIVERSITY_ID)
     var selectedUniId by remember { mutableStateOf(defaultUni.id) }
     val selectedUni = remember(selectedUniId) { KenyanUniversities.getById(selectedUniId) }
+    val allDepts = remember(selectedUniId) {
+        (selectedUni.departments + KenyanUniversities.allKenyanDepartments).distinctBy { it.name.lowercase() }
+    }
     var selectedDept by remember(selectedUniId) {
-        mutableStateOf(selectedUni.departments.firstOrNull()?.name ?: "Department of Computer Science")
+        mutableStateOf(allDepts.firstOrNull()?.name ?: "Department of Computer Science")
     }
 
     val availableCourses = remember(selectedUniId, selectedDept, customCourses) {
-        val presets = selectedUni.departments.find { it.name == selectedDept }?.courses ?: emptyList()
+        val presets = allDepts.find { it.name.equals(selectedDept, ignoreCase = true) }?.courses ?: emptyList()
         val customs = customCourses
             .filter { it.universityId == selectedUniId && it.department.equals(selectedDept, ignoreCase = true) }
             .map { PresetCourse(it.courseCode, it.courseName) }
@@ -246,10 +229,10 @@ fun AddStudentDialog(
     }
 
     var selectedCourse by remember(availableCourses) {
-        mutableStateOf(availableCourses.firstOrNull()?.name ?: "B.Sc. Computer Science")
+        mutableStateOf(availableCourses.firstOrNull()?.name ?: "Bachelor of Science in Computer Science")
     }
     var selectedCourseCode by remember(availableCourses) {
-        mutableStateOf(availableCourses.firstOrNull()?.code ?: "C026")
+        mutableStateOf(availableCourses.firstOrNull()?.code ?: "CSC")
     }
 
     var cardUid by remember { mutableStateOf(prefilledCardUid) }
@@ -271,12 +254,11 @@ fun AddStudentDialog(
                     .padding(18.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Text("Register Student Card", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Add Student to Directory", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text("Select University -> Department -> Course", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // University
                 Box {
                     OutlinedTextField(
                         value = selectedUni.name,
@@ -294,7 +276,7 @@ fun AddStudentDialog(
                                 text = { Text("${uni.shortName} — ${uni.name}", fontSize = 12.sp) },
                                 onClick = {
                                     selectedUniId = uni.id
-                                    selectedDept = uni.departments.firstOrNull()?.name ?: "General"
+                                    selectedDept = uni.departments.firstOrNull()?.name ?: "Department of Computer Science"
                                     uniMenu = false
                                 }
                             )
@@ -304,7 +286,6 @@ fun AddStudentDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Department BEFORE Course
                 Box {
                     OutlinedTextField(
                         value = selectedDept,
@@ -317,7 +298,7 @@ fun AddStudentDialog(
                     )
                     Box(modifier = Modifier.matchParentSize().clickable { deptMenu = true })
                     DropdownMenu(expanded = deptMenu, onDismissRequest = { deptMenu = false }) {
-                        selectedUni.departments.forEach { d ->
+                        allDepts.forEach { d ->
                             DropdownMenuItem(
                                 text = { Text(d.name, fontSize = 12.sp) },
                                 onClick = {
@@ -331,7 +312,6 @@ fun AddStudentDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Course
                 Box {
                     OutlinedTextField(
                         value = selectedCourse,
@@ -363,7 +343,7 @@ fun AddStudentDialog(
                     value = cardUid,
                     onValueChange = { cardUid = it.uppercase() },
                     label = { Text("NFC Card UID (Hex, optional)") },
-                    placeholder = { Text("e.g. 86A23B5C") },
+                    placeholder = { Text("e.g. 86A098BF") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -373,8 +353,8 @@ fun AddStudentDialog(
                 OutlinedTextField(
                     value = regNumber,
                     onValueChange = { regNumber = it.uppercase() },
-                    label = { Text("Registration Number") },
-                    placeholder = { Text("e.g. C026-01-0123/2024") },
+                    label = { Text("Registration Number *") },
+                    placeholder = { Text("e.g. E021-01-1034/2024") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -384,8 +364,8 @@ fun AddStudentDialog(
                 OutlinedTextField(
                     value = fullName,
                     onValueChange = { fullName = it },
-                    label = { Text("Full Name") },
-                    placeholder = { Text("e.g. Jane Wambui") },
+                    label = { Text("Full Name *") },
+                    placeholder = { Text("e.g. Joseph Karoki Mwangi") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -431,9 +411,9 @@ fun ImportRosterCsvDialog(
     onImport: (String, String, String, String) -> Unit
 ) {
     var defaultDept by remember { mutableStateOf("Department of Computer Science") }
-    var defaultCourse by remember { mutableStateOf("B.Sc. Computer Science") }
+    var defaultCourse by remember { mutableStateOf("Bachelor of Science in Computer Science") }
     var csvText by remember {
-        mutableStateOf("C026-01-0101/2024, John Kamau, Department of Computer Science, B.Sc. Computer Science\nC026-01-0102/2024, Alice Wanjiru, Department of Computer Science, B.Sc. Computer Science")
+        mutableStateOf("C026-01-0101/2024, John Kamau, Department of Computer Science, Bachelor of Science in Computer Science\nE021-01-0102/2024, Alice Wanjiru, Department of Electrical & Electronic Engineering, Bachelor of Science in Electrical and Electronics Engineering")
     }
 
     Dialog(onDismissRequest = onDismiss) {

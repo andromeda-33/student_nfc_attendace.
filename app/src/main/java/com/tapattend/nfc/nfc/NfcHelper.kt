@@ -102,6 +102,30 @@ class NfcHelper(private val activity: Activity) {
         return bytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
     }
 
+    private val completeBoundaryWords = setOf(
+        "bachelor", "science", "sciences", "technology", "engineering", "electrical",
+        "electronic", "electronics", "computer", "computing", "information", "mechanical",
+        "civil", "mechatronic", "chemical", "telecommunication", "telecommunications",
+        "commerce", "business", "administration", "economics", "nursing", "medicine",
+        "agriculture", "geomatic", "geospatial", "applied", "industrial", "hospitality",
+        "tourism", "criminology", "education", "management", "mathematics", "statistics",
+        "actuarial", "systems", "software", "security", "food", "nutrition", "dietetics",
+        "analytics", "forensics", "manufacturing", "structural", "environmental", "arts"
+    )
+
+    private fun extractBlockAsciiRaw(bytes: ByteArray): String {
+        val sb = StringBuilder()
+        for (b in bytes) {
+            val c = b.toInt() and 0xFF
+            if (c in 32..126) {
+                sb.append(c.toChar())
+            } else if (c == 0) {
+                if (sb.isNotEmpty()) break
+            }
+        }
+        return sb.toString()
+    }
+
     private fun extractPrintableAscii(bytes: ByteArray): String {
         val sb = StringBuilder()
         for (b in bytes) {
@@ -118,6 +142,41 @@ class NfcHelper(private val activity: Activity) {
             .map { it.trim() }
             .filter { it.length >= 2 }
             .joinToString("\n")
+    }
+
+    private fun appendStitchedBlock(
+        buffer: StringBuilder,
+        nextChunkRaw: String,
+        prevHadTrailingSpace: Boolean
+    ) {
+        val nextTrim = nextChunkRaw.trim()
+        if (nextTrim.isEmpty()) return
+
+        if (buffer.isEmpty()) {
+            buffer.append(nextTrim)
+            return
+        }
+
+        val currentStr = buffer.toString()
+        val prevLastChar = currentStr.last()
+        val nextFirstChar = nextTrim.first()
+        val lastWord = currentStr.substringAfterLast(' ').lowercase()
+        val nextFirstWord = nextTrim.substringBefore(' ').lowercase()
+        val leadingSpace = nextChunkRaw.firstOrNull() == ' '
+
+        val needsSpace = when {
+            prevHadTrailingSpace || leadingSpace -> true
+            prevLastChar.isLowerCase() && nextFirstChar.isUpperCase() && lastWord.length >= 3 -> true
+            lastWord in completeBoundaryWords &&
+                nextFirstWord in setOf("and", "of", "in", "for", "with", "to", "&") -> true
+            lastWord in completeBoundaryWords && nextFirstChar.isUpperCase() -> true
+            else -> false
+        }
+
+        if (needsSpace && !currentStr.endsWith(" ")) {
+            buffer.append(' ')
+        }
+        buffer.append(nextTrim)
     }
 
     private fun decodeNdefRecord(record: NdefRecord): String? {
@@ -238,9 +297,20 @@ class NfcHelper(private val activity: Activity) {
     private fun readMifareClassic(tag: Tag): Pair<String?, String> {
         val mfc = MifareClassic.get(tag) ?: return Pair(null, "")
         val dump = StringBuilder()
-        val asciiCollected = StringBuilder()
+        val stitchedFields = mutableListOf<String>()
+        val currentField = StringBuilder()
+        var prevHadTrailingSpace = false
         var unlockedSectors = 0
         var lockedSectors = 0
+
+        fun flushCurrentField() {
+            val built = currentField.toString().trim()
+            if (built.length >= 2) {
+                stitchedFields.add(built)
+            }
+            currentField.clear()
+            prevHadTrailingSpace = false
+        }
 
         val commonKeys = listOf(
             MifareClassic.KEY_DEFAULT,
@@ -268,6 +338,7 @@ class NfcHelper(private val activity: Activity) {
                 }
 
                 if (!authenticated) {
+                    flushCurrentField()
                     lockedSectors++
                     continue
                 }
@@ -280,27 +351,37 @@ class NfcHelper(private val activity: Activity) {
                     if (sector == 0 && offset == 0) continue // Skip manufacturer UID block
                     try {
                         val blockBytes = mfc.readBlock(blockIndex)
-                        val ascii = extractPrintableAscii(blockBytes)
-                        if (ascii.isNotBlank()) {
-                            asciiCollected.appendLine(ascii)
-                            dump.appendLine("S$sector/B$blockIndex: \"$ascii\"")
+                        val rawAscii = extractBlockAsciiRaw(blockBytes)
+                        val cleanDisplay = rawAscii.trim()
+                        if (cleanDisplay.isNotEmpty() && cleanDisplay.any { it.isLetterOrDigit() }) {
+                            appendStitchedBlock(currentField, rawAscii, prevHadTrailingSpace)
+                            prevHadTrailingSpace = rawAscii.lastOrNull() == ' '
+                            dump.appendLine("S$sector/B$blockIndex: \"$cleanDisplay\"")
                         } else {
+                            flushCurrentField()
                             val nonZero = blockBytes.any { it.toInt() != 0 }
                             if (nonZero) {
                                 dump.appendLine("S$sector/B$blockIndex: ${bytesToHex(blockBytes)}")
                             }
                         }
                     } catch (_: Exception) {
+                        flushCurrentField()
                     }
                 }
             }
 
+            flushCurrentField()
+
+            if (stitchedFields.isNotEmpty()) {
+                dump.appendLine("\nStitched Card Fields:")
+                stitchedFields.forEach { dump.appendLine("  • $it") }
+            }
             dump.appendLine("Sectors readable: $unlockedSectors | Encrypted/locked: $lockedSectors")
             if (unlockedSectors == 0) {
                 dump.appendLine("All sectors use private university keys — only card UID is exposed locally.")
             }
 
-            Pair(asciiCollected.toString().trim().ifBlank { null }, dump.toString().trim())
+            Pair(stitchedFields.joinToString("\n").ifBlank { null }, dump.toString().trim())
         } catch (e: Exception) {
             Pair(null, "MIFARE Classic error: ${e.message}")
         } finally {
@@ -326,7 +407,6 @@ class NfcHelper(private val activity: Activity) {
                 }
             }
 
-            // Probe standard NFC Forum Type 4 NDEF AID: D2760000850101
             val selectNdefAid = byteArrayOf(
                 0x00, 0xA4.toByte(), 0x04, 0x00,
                 0x07, 0xD2.toByte(), 0x76, 0x00, 0x00, 0x85.toByte(), 0x01, 0x01,
@@ -340,7 +420,6 @@ class NfcHelper(private val activity: Activity) {
             }
             dump.appendLine("IsoDep NDEF AID status: SW=$swHex")
             if (swHex == "9000") {
-                // Select NDEF file E104 and read length + payload
                 val selectFile = byteArrayOf(0x00, 0xA4.toByte(), 0x00, 0x0C, 0x02, 0xE1.toByte(), 0x04)
                 val selResp = iso.transceive(selectFile)
                 if (selResp.size >= 2 && selResp[selResp.size - 2] == 0x90.toByte()) {
@@ -404,18 +483,17 @@ class NfcHelper(private val activity: Activity) {
             "UID Only (No readable text in card memory)"
         }
 
-        val base = parseTextIntoCardData(
+        return parseTextIntoCardData(
             cardUid = uid,
             rawText = combinedText.ifBlank { null },
             techList = techs,
             memorySource = memorySource,
             rawDump = dumpSections.joinToString("\n\n")
         )
-        return base
     }
 
     /**
-     * Parses raw text extracted from an NFC card (or simulated local card payload)
+     * Parses raw text extracted from an NFC card
      * into Student Name, Reg Number, Course, and Department.
      */
     fun parseTextIntoCardData(
@@ -468,8 +546,8 @@ class NfcHelper(private val activity: Activity) {
                 }
             }
 
-            // 3. Fallback delimited format (pipe, comma, semicolon, tab, or multi-line)
-            if (suggestedReg == null || suggestedName == null) {
+            // 3. Fallback delimited format (pipe, tab, newline, comma, semicolon)
+            if (suggestedReg == null || suggestedName == null || suggestedCourse == null) {
                 val tokens = trimmed.split(Regex("[|\\t\\n,;]+"))
                     .map { it.trim() }
                     .filter { it.isNotBlank() && !it.startsWith("{") }
@@ -491,22 +569,26 @@ class NfcHelper(private val activity: Activity) {
                 suggestedReg = (kenyanRegRegex.find(trimmed)?.value ?: slashRegRegex.find(trimmed)?.value)?.uppercase()
             }
 
-            // 5. Auto-infer Kenyan university Department & Course from registration number prefix (e.g. C026 -> B.Sc. Computer Science)
-            if (suggestedReg != null && (suggestedCourse == null || suggestedDept == null)) {
-                val prefix = Regex("""^[A-Z]+\d+""").find(suggestedReg.trim())?.value
-                if (!prefix.isNullOrBlank()) {
-                    for (uni in KenyanUniversities.list) {
-                        for (dept in uni.departments) {
-                            val matchedCourse = dept.courses.find { it.code.equals(prefix, ignoreCase = true) }
-                            if (matchedCourse != null) {
-                                if (suggestedDept == null) suggestedDept = dept.name
-                                if (suggestedCourse == null) suggestedCourse = matchedCourse.name
-                                if (suggestedCourseCode == null) suggestedCourseCode = matchedCourse.code
-                                break
-                            }
+            // 5. Extract Reg prefix code (e.g. E021 from E021-01-1034/2024)
+            if (suggestedCourseCode == null && suggestedReg != null) {
+                suggestedCourseCode = Regex("""^[A-Z]+\d+""").find(suggestedReg.trim())?.value?.uppercase()
+            }
+
+            // 6. Auto-infer Kenyan university Department & Course from Reg prefix OR extracted Course Name
+            if (suggestedDept == null) {
+                suggestedDept = KenyanUniversities.inferDepartmentFromCourse(suggestedCourse, suggestedCourseCode)
+            }
+            if (suggestedCourse == null && suggestedCourseCode != null) {
+                for (uni in KenyanUniversities.list) {
+                    for (dept in uni.departments) {
+                        val matchedCourse = dept.courses.find { it.code.equals(suggestedCourseCode, ignoreCase = true) }
+                        if (matchedCourse != null) {
+                            suggestedCourse = matchedCourse.name
+                            if (suggestedDept == null) suggestedDept = dept.name
+                            break
                         }
-                        if (suggestedCourse != null) break
                     }
+                    if (suggestedCourse != null) break
                 }
             }
         }
@@ -551,16 +633,20 @@ class NfcHelper(private val activity: Activity) {
     private fun isLikelyCourse(token: String): Boolean {
         val l = token.lowercase()
         return l.startsWith("b.sc") || l.startsWith("bsc") || l.startsWith("bachelor") ||
-            l.startsWith("b.tech") || l.startsWith("b.ed") || l.startsWith("diploma") ||
-            l.contains("engineering") || l.contains("computer science") || l.contains("information technology")
+            l.startsWith("b.tech") || l.startsWith("b.ed") || l.startsWith("b.com") ||
+            l.startsWith("b.a") || l.startsWith("diploma") || l.startsWith("certificate") ||
+            l.contains("engineering") || l.contains("computer science") ||
+            l.contains("information technology") || l.contains("actuarial") ||
+            l.contains("commerce") || l.contains("economics") || l.contains("nursing") ||
+            l.contains("medicine") || l.contains("education")
     }
 
     private fun isLikelyFullName(token: String): Boolean {
-        if (token.length < 4 || token.length > 60) return false
+        if (token.length < 4 || token.length > 64) return false
         if (token.any { it.isDigit() }) return false
         if (isLikelyDepartment(token) || isLikelyCourse(token)) return false
         val words = token.split(Regex("\\s+")).filter { it.isNotBlank() }
-        return words.size in 2..5 && words.all { it.all { ch -> ch.isLetter() || ch == '\'' || ch == '-' || ch == '.' } }
+        return words.size in 2..6 && words.all { it.all { ch -> ch.isLetter() || ch == '\'' || ch == '-' || ch == '.' } }
     }
 
     /**

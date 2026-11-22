@@ -1,5 +1,6 @@
 package com.tapattend.nfc.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,13 +14,23 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tapattend.nfc.data.AttendanceRecord
 import com.tapattend.nfc.data.AttendanceSession
+import com.tapattend.nfc.data.KenyanUniversities
 import com.tapattend.nfc.data.SessionType
+import kotlin.math.cos
+import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,43 +38,33 @@ fun HomeScreen(
     sessions: List<AttendanceSession>,
     records: List<AttendanceRecord>,
     studentCount: Int,
-    isCloudConfigured: Boolean,
-    isSyncing: Boolean,
-    lastSyncTime: String?,
-    currentSyncKey: String,
     onSelectSession: (AttendanceSession) -> Unit,
     onCreateNewSession: () -> Unit,
     onOpenRoster: () -> Unit,
-    onOpenCardRegistration: () -> Unit,
     onOpenCardInspector: () -> Unit,
-    onUpdateDatabase: () -> Unit,
-    onSaveSyncKey: (String) -> Unit,
     onDeleteSession: (AttendanceSession) -> Unit
 ) {
-    var showSyncKeyDialog by remember { mutableStateOf(false) }
-    var syncKeyInput by remember(currentSyncKey) { mutableStateOf(currentSyncKey) }
-
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("TapAttend NFC", fontWeight = FontWeight.Bold)
-                        Text(
-                            "Kenyan University Roll Call & Cloud Sync",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        UniversityCrestBadge(
+                            universityId = KenyanUniversities.DEFAULT_UNIVERSITY_ID,
+                            size = 38.dp
                         )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text("TapAttend NFC", fontWeight = FontWeight.Bold)
+                            Text(
+                                "Offline NFC & Kenyan University Attendance",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showSyncKeyDialog = true }) {
-                        Icon(
-                            Icons.Default.VpnKey,
-                            contentDescription = "Cloud Sync Key",
-                            tint = if (isCloudConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     IconButton(onClick = onOpenRoster) {
                         Icon(Icons.Default.People, contentDescription = "Student Roster")
                     }
@@ -112,54 +113,22 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Primary Cloud & NFC Registration Actions
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = onOpenCardRegistration,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
-                ) {
-                    Icon(Icons.Default.Nfc, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Tap & Register", fontSize = 12.sp)
-                }
-
-                FilledTonalButton(
-                    onClick = {
-                        if (!isCloudConfigured) {
-                            showSyncKeyDialog = true
-                        } else {
-                            onUpdateDatabase()
-                        }
-                    },
-                    enabled = !isSyncing,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        when {
-                            isSyncing -> "Updating..."
-                            lastSyncTime != null -> "Update ($lastSyncTime)"
-                            else -> "Update Roster"
-                        },
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
             OutlinedButton(
                 onClick = onOpenCardInspector,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Default.Memory, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFF7C3AED))
+                Icon(
+                    Icons.Default.Memory,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = Color(0xFF7C3AED)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Inspect / Test Card (Read Local Chip Data)", fontSize = 12.sp, color = Color(0xFF6D28D9))
+                Text(
+                    "Inspect Physical NFC Card (Local Chip Reader)",
+                    fontSize = 12.sp,
+                    color = Color(0xFF6D28D9)
+                )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -217,46 +186,122 @@ fun HomeScreen(
             }
         }
     }
+}
 
-    if (showSyncKeyDialog) {
-        AlertDialog(
-            onDismissRequest = { showSyncKeyDialog = false },
-            title = { Text("Cloud Database Sync Key", fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text(
-                        "Paste the Sync Key from the TapAttend Web App (sign in -> 'APK Sync Key') to sync registered student cards across devices and future APK builds.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = syncKeyInput,
-                        onValueChange = { syncKeyInput = it },
-                        label = { Text("Firebase Sync Key") },
-                        placeholder = { Text("Paste key here...") },
-                        modifier = Modifier.fillMaxWidth(),
-                        maxLines = 3
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onSaveSyncKey(syncKeyInput.trim())
-                        showSyncKeyDialog = false
-                        if (syncKeyInput.isNotBlank()) {
-                            onUpdateDatabase()
-                        }
-                    }
-                ) {
-                    Text("Save & Update")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSyncKeyDialog = false }) { Text("Cancel") }
+@Composable
+fun UniversityCrestBadge(
+    universityId: String,
+    size: Dp = 36.dp
+) {
+    val uni = remember(universityId) { KenyanUniversities.getById(universityId) }
+    val primary = Color(uni.primaryColorHex)
+    val accent = Color(uni.accentColorHex)
+
+    Canvas(modifier = Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val cx = w / 2f
+
+        // Heraldic shield silhouette
+        val shield = Path().apply {
+            moveTo(w * 0.14f, h * 0.10f)
+            lineTo(w * 0.86f, h * 0.10f)
+            lineTo(w * 0.86f, h * 0.56f)
+            quadraticBezierTo(w * 0.86f, h * 0.82f, cx, h * 0.93f)
+            quadraticBezierTo(w * 0.14f, h * 0.82f, w * 0.14f, h * 0.56f)
+            close()
+        }
+        drawPath(path = shield, color = Color(0xFFFCFDF9))
+        drawPath(path = shield, color = primary, style = Stroke(width = w * 0.055f))
+
+        if (uni.id == "dekut") {
+            // Rising gold sun
+            drawCircle(
+                color = accent,
+                radius = w * 0.10f,
+                center = Offset(cx, h * 0.25f)
+            )
+            // Twin Mount Kenya peaks in forest green
+            val peaks = Path().apply {
+                moveTo(w * 0.22f, h * 0.54f)
+                lineTo(w * 0.40f, h * 0.31f)
+                lineTo(w * 0.50f, h * 0.42f)
+                lineTo(w * 0.62f, h * 0.27f)
+                lineTo(w * 0.78f, h * 0.54f)
+                close()
             }
-        )
+            drawPath(path = peaks, color = primary)
+
+            // Snow caps
+            val leftSnow = Path().apply {
+                moveTo(w * 0.35f, h * 0.37f)
+                lineTo(w * 0.40f, h * 0.31f)
+                lineTo(w * 0.44f, h * 0.36f)
+                close()
+            }
+            val rightSnow = Path().apply {
+                moveTo(w * 0.57f, h * 0.34f)
+                lineTo(w * 0.62f, h * 0.27f)
+                lineTo(w * 0.67f, h * 0.35f)
+                close()
+            }
+            drawPath(path = leftSnow, color = Color.White)
+            drawPath(path = rightSnow, color = Color.White)
+
+            // 8-tooth crimson/gold gear wheel at base of shield
+            val gearCenter = Offset(cx, h * 0.68f)
+            val gearR = w * 0.12f
+            for (i in 0 until 8) {
+                val angle = i * 45f
+                rotate(degrees = angle, pivot = gearCenter) {
+                    drawRect(
+                        color = Color(0xFFB91C1C),
+                        topLeft = Offset(cx - w * 0.03f, gearCenter.y - gearR - w * 0.03f),
+                        size = Size(w * 0.06f, w * 0.05f)
+                    )
+                }
+            }
+            drawCircle(color = Color(0xFFB91C1C), radius = gearR, center = gearCenter)
+            drawCircle(color = accent, radius = gearR * 0.7f, center = gearCenter)
+            drawCircle(color = Color.White, radius = gearR * 0.34f, center = gearCenter)
+        } else {
+            // Academic chevron + open book + flame for other Kenyan universities
+            val band = Path().apply {
+                moveTo(w * 0.22f, h * 0.34f)
+                lineTo(cx, h * 0.23f)
+                lineTo(w * 0.78f, h * 0.34f)
+                lineTo(w * 0.78f, h * 0.46f)
+                lineTo(cx, h * 0.35f)
+                lineTo(w * 0.22f, h * 0.46f)
+                close()
+            }
+            drawPath(path = band, color = primary)
+
+            val bookLeft = Path().apply {
+                moveTo(w * 0.27f, h * 0.56f)
+                lineTo(cx - w * 0.02f, h * 0.60f)
+                lineTo(cx - w * 0.02f, h * 0.75f)
+                lineTo(w * 0.27f, h * 0.70f)
+                close()
+            }
+            val bookRight = Path().apply {
+                moveTo(w * 0.73f, h * 0.56f)
+                lineTo(cx + w * 0.02f, h * 0.60f)
+                lineTo(cx + w * 0.02f, h * 0.75f)
+                lineTo(w * 0.73f, h * 0.70f)
+                close()
+            }
+            drawPath(path = bookLeft, color = accent)
+            drawPath(path = bookRight, color = accent)
+
+            // Rays
+            for (k in 0..4) {
+                val rad = Math.toRadians((200 + k * 35).toDouble())
+                val x1 = cx + (w * 0.08f * cos(rad)).toFloat()
+                val y1 = h * 0.21f + (h * 0.08f * sin(rad)).toFloat()
+                drawCircle(color = accent, radius = w * 0.022f, center = Offset(x1, y1))
+            }
+        }
     }
 }
 
@@ -264,7 +309,7 @@ fun HomeScreen(
 fun StatCard(
     title: String,
     value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     modifier: Modifier = Modifier,
     color: Color
 ) {
@@ -324,17 +369,21 @@ fun SessionItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = typeBadgeColor.copy(alpha = 0.12f)
-                ) {
-                    Text(
-                        text = session.sessionType.displayName,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        color = typeBadgeColor,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    UniversityCrestBadge(universityId = session.universityId, size = 28.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = typeBadgeColor.copy(alpha = 0.12f)
+                    ) {
+                        Text(
+                            text = session.sessionType.displayName,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            color = typeBadgeColor,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
                 IconButton(

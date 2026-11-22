@@ -1,4 +1,9 @@
-import { DEFAULT_UNIVERSITY_ID, getUniversityById } from '../data/kenyanUniversities';
+import {
+  DEFAULT_UNIVERSITY_ID,
+  getUniversityById,
+  inferDepartmentFromCourse,
+  isCourseMatch,
+} from '../data/kenyanUniversities';
 import {
   AttendanceRecord,
   AttendanceSession,
@@ -482,6 +487,58 @@ export async function manualCheckInStudent(
   );
 }
 
+export async function manualFastCheckIn(params: {
+  session: AttendanceSession;
+  regNumber: string;
+  fullName: string;
+  courseName?: string;
+  department?: string;
+  weekNumber: number | null;
+  customValues?: Record<string, string>;
+}): Promise<RecordTapResult> {
+  const cleanReg = params.regNumber.trim().toUpperCase();
+  const cleanName = params.fullName.trim();
+  const existing = getStudents().find(
+    (s) => s.regNumber.toLowerCase() === cleanReg.toLowerCase()
+  );
+  const resolvedCourse =
+    params.courseName?.trim() ||
+    params.session.allowedCourses[0] ||
+    'General Programme';
+  const resolvedDept =
+    params.department?.trim() ||
+    inferDepartmentFromCourse(resolvedCourse) ||
+    params.session.department;
+  const uni = getUniversityById(params.session.universityId);
+  const matchedCourse = uni.departments
+    .flatMap((d) => d.courses)
+    .find((c) => isCourseMatch(c.name, resolvedCourse));
+  const resolvedCode =
+    matchedCourse?.code ||
+    cleanReg.match(/^[A-Z]+\d+/)?.[0] ||
+    existing?.courseCode ||
+    params.session.courseCode;
+
+  const savedStudent = addOrUpdateStudent({
+    id: existing?.id,
+    cardUid: existing?.cardUid || '',
+    regNumber: cleanReg,
+    fullName: cleanName,
+    universityId: params.session.universityId,
+    universityName: params.session.universityName,
+    department: resolvedDept,
+    courseCode: resolvedCode,
+    courseName: resolvedCourse,
+  });
+
+  return manualCheckInStudent(
+    params.session,
+    savedStudent,
+    params.weekNumber,
+    params.customValues || {}
+  );
+}
+
 async function markStudentPresent(
   session: AttendanceSession,
   student: Student,
@@ -490,12 +547,12 @@ async function markStudentPresent(
   customValues: Record<string, string>,
   allowCourseOverride: boolean
 ): Promise<RecordTapResult> {
-  // Enforce course restriction so students cannot accidentally register in wrong class
+  // Enforce intelligent course restriction (tolerant of minor card wording/spelling variations)
   if (!allowCourseOverride && session.allowedCourses.length > 0) {
-    const allowedSet = new Set(
-      session.allowedCourses.map((c) => c.trim().toLowerCase())
+    const isAllowed = session.allowedCourses.some((allowed) =>
+      isCourseMatch(allowed, student.courseName)
     );
-    if (!allowedSet.has(student.courseName.trim().toLowerCase())) {
+    if (!isAllowed) {
       return {
         type: 'WRONG_COURSE',
         student,
@@ -598,12 +655,10 @@ export function computeSemesterMatrix(
 ): StudentMatrixRow[] {
   const allStudents = getStudents().filter((s) => {
     if (filterCourse) {
-      return s.courseName.trim().toLowerCase() === filterCourse.trim().toLowerCase();
+      return isCourseMatch(filterCourse, s.courseName);
     }
     if (session.allowedCourses.length > 0) {
-      return session.allowedCourses.some(
-        (c) => c.trim().toLowerCase() === s.courseName.trim().toLowerCase()
-      );
+      return session.allowedCourses.some((c) => isCourseMatch(c, s.courseName));
     }
     return true;
   });
@@ -619,7 +674,9 @@ export function computeSemesterMatrix(
   return allStudents.map((student) => {
     const cleanUid = normalizeUid(student.cardUid);
     const studentRecords = records.filter(
-      (r) => cleanUid !== '' && normalizeUid(r.studentCardUid) === cleanUid
+      (r) =>
+        (cleanUid !== '' && normalizeUid(r.studentCardUid) === cleanUid) ||
+        r.regNumber.toLowerCase() === student.regNumber.toLowerCase()
     );
 
     const attendanceBySession: Record<number, boolean> = {};

@@ -21,11 +21,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.lifecycleScope
 import com.tapattend.nfc.data.*
 import com.tapattend.nfc.nfc.NfcHelper
 import com.tapattend.nfc.ui.*
-import kotlinx.coroutines.launch
 
 enum class AppScreen {
     HOME,
@@ -38,7 +36,6 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var storage: AttendanceStorage
     private lateinit var nfcHelper: NfcHelper
-    private lateinit var cloudSync: CloudDatabaseSync
 
     // Observable states for Compose
     private var currentScreen by mutableStateOf(AppScreen.HOME)
@@ -47,12 +44,9 @@ class MainActivity : ComponentActivity() {
     private var lastScannedUid by mutableStateOf<String?>(null)
     private var lastScanResult by mutableStateOf<ScanBannerState?>(null)
     private var pendingCardToEnroll by mutableStateOf<ParsedCardData?>(null)
-    private var showCardRegisterDialog by mutableStateOf(false)
-    private var pendingRegistrationCard by mutableStateOf<ParsedCardData?>(null)
     private var showCardInspector by mutableStateOf(false)
     private var inspectedCardData by mutableStateOf<ParsedCardData?>(null)
     private var showExportFormatDialog by mutableStateOf(false)
-    private var isSyncing by mutableStateOf(false)
     private var refreshTrigger by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,12 +54,11 @@ class MainActivity : ComponentActivity() {
 
         storage = AttendanceStorage(this)
         nfcHelper = NfcHelper(this)
-        cloudSync = CloudDatabaseSync(this)
 
         if (!nfcHelper.isNfcSupported) {
             Toast.makeText(
                 this,
-                "Notice: NFC is not supported on this phone. Use 'Simulate Tap' or 'Manual Entry'.",
+                "Notice: NFC is not supported on this phone. Use 'Fast Manual Check-In' to mark attendance.",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -89,10 +82,6 @@ class MainActivity : ComponentActivity() {
                                 sessions = sessions,
                                 records = records,
                                 studentCount = students.size,
-                                isCloudConfigured = cloudSync.isConfigured(),
-                                isSyncing = isSyncing,
-                                lastSyncTime = cloudSync.getLastSyncTimeFormatted(),
-                                currentSyncKey = cloudSync.getRefreshToken(),
                                 onSelectSession = { session ->
                                     activeSession = session
                                     activeWeek = 1
@@ -101,23 +90,9 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onCreateNewSession = { showCreateDialog = true },
                                 onOpenRoster = { currentScreen = AppScreen.STUDENT_ROSTER },
-                                onOpenCardRegistration = {
-                                    pendingRegistrationCard = null
-                                    showCardRegisterDialog = true
-                                },
                                 onOpenCardInspector = {
                                     inspectedCardData = null
                                     showCardInspector = true
-                                },
-                                onUpdateDatabase = {
-                                    performDatabaseSync(
-                                        activeSession?.universityId ?: KenyanUniversities.DEFAULT_UNIVERSITY_ID
-                                    )
-                                },
-                                onSaveSyncKey = { key ->
-                                    cloudSync.saveRefreshToken(key)
-                                    refreshTrigger++
-                                    Toast.makeText(this@MainActivity, "Cloud Sync Key saved", Toast.LENGTH_SHORT).show()
                                 },
                                 onDeleteSession = { session ->
                                     storage.deleteSession(session.id)
@@ -129,11 +104,8 @@ class MainActivity : ComponentActivity() {
                                 CreateSessionDialog(
                                     customCourses = customCourses,
                                     onAddCustomCourse = { course ->
-                                        val saved = storage.addCustomCourse(course)
+                                        storage.addCustomCourse(course)
                                         refreshTrigger++
-                                        lifecycleScope.launch {
-                                            cloudSync.pushCustomCourse(saved)
-                                        }
                                     },
                                     onDismiss = { showCreateDialog = false },
                                     onCreate = { newSession ->
@@ -162,13 +134,9 @@ class MainActivity : ComponentActivity() {
                                     students = students,
                                     customCourses = customCourses,
                                     selectedWeek = activeWeek,
-                                    isSyncing = isSyncing,
                                     onWeekChanged = { activeWeek = it },
                                     onBack = { currentScreen = AppScreen.HOME },
                                     onOpenMatrix = { currentScreen = AppScreen.SEMESTER_MATRIX },
-                                    onUpdateDatabase = {
-                                        performDatabaseSync(session.universityId)
-                                    },
                                     onExport = { showExportFormatDialog = true },
                                     lastScannedResult = lastScanResult,
                                     onManualCheckIn = { student ->
@@ -176,19 +144,18 @@ class MainActivity : ComponentActivity() {
                                         val res = storage.manualCheckInStudent(session, student, weekNum)
                                         handleRecordResult(res, ParsedCardData(student.cardUid))
                                     },
-                                    onSimulateScan = {
-                                        if (students.isNotEmpty()) {
-                                            val randomStudent = students.random()
-                                            if (randomStudent.cardUid.isNotBlank()) {
-                                                processCardUid(randomStudent.cardUid)
-                                            } else {
-                                                val fakeUid = "04%08X".format((0x10000000..0x7FFFFFFF).random())
-                                                processCardData(ParsedCardData(fakeUid))
-                                            }
-                                        } else {
-                                            val fakeUid = "04%08X".format((0x10000000..0x7FFFFFFF).random())
-                                            processCardData(ParsedCardData(fakeUid))
-                                        }
+                                    onFastManualCheckIn = { reg, name, courseName, dept, customVals ->
+                                        val weekNum = if (session.isMultiSession()) activeWeek else null
+                                        val res = storage.manualFastCheckIn(
+                                            session = session,
+                                            regNumber = reg,
+                                            fullName = name,
+                                            courseName = courseName,
+                                            department = dept,
+                                            weekNumber = weekNum,
+                                            customValues = customVals
+                                        )
+                                        handleRecordResult(res, ParsedCardData(""))
                                     },
                                     pendingCardToEnroll = pendingCardToEnroll,
                                     onDismissEnrollDialog = { pendingCardToEnroll = null },
@@ -208,11 +175,6 @@ class MainActivity : ComponentActivity() {
                                             customValues = customVals
                                         )
                                         handleRecordResult(res, ParsedCardData(cardUid))
-                                        if (res is AttendanceStorage.RecordResult.Success) {
-                                            lifecycleScope.launch {
-                                                cloudSync.pushStudent(res.student)
-                                            }
-                                        }
                                     }
                                 )
 
@@ -268,23 +230,10 @@ class MainActivity : ComponentActivity() {
                             StudentRosterScreen(
                                 students = students,
                                 customCourses = customCourses,
-                                isSyncing = isSyncing,
                                 onBack = { currentScreen = AppScreen.HOME },
-                                onUpdateDatabase = {
-                                    performDatabaseSync(
-                                        activeSession?.universityId ?: KenyanUniversities.DEFAULT_UNIVERSITY_ID
-                                    )
-                                },
-                                onOpenCardRegistration = {
-                                    pendingRegistrationCard = null
-                                    showCardRegisterDialog = true
-                                },
                                 onAddStudent = { newStudent ->
                                     val saved = storage.addOrUpdateStudent(newStudent)
                                     refreshTrigger++
-                                    lifecycleScope.launch {
-                                        cloudSync.pushStudent(saved)
-                                    }
                                     Toast.makeText(this@MainActivity, "Saved: ${saved.fullName}", Toast.LENGTH_SHORT).show()
                                 },
                                 onDeleteStudent = { student ->
@@ -302,69 +251,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    if (showCardRegisterDialog) {
-                        CardRegistrationDialog(
-                            capturedCardData = pendingRegistrationCard,
-                            customCourses = customCourses,
-                            isCloudConfigured = cloudSync.isConfigured(),
-                            onSimulateCardUid = { fakeUid ->
-                                nfcHelper.playSuccessFeedback()
-                                pendingRegistrationCard = nfcHelper.parseTextIntoCardData(
-                                    cardUid = fakeUid,
-                                    rawText = null,
-                                    memorySource = "Simulated UID Card"
-                                )
-                            },
-                            onClearCardUid = { pendingRegistrationCard = null },
-                            onAddCustomCourse = { course ->
-                                val saved = storage.addCustomCourse(course)
-                                refreshTrigger++
-                                lifecycleScope.launch {
-                                    cloudSync.pushCustomCourse(saved)
-                                }
-                            },
-                            onSaveStudent = { student ->
-                                val saved = storage.addOrUpdateStudent(student)
-                                refreshTrigger++
-                                pendingRegistrationCard = null
-                                lifecycleScope.launch {
-                                    val cloudRes = cloudSync.pushStudent(saved)
-                                    val msg = if (cloudRes.isSuccess && cloudSync.isConfigured()) {
-                                        "Saved & synced to Cloud DB: ${saved.fullName}"
-                                    } else {
-                                        "Saved locally: ${saved.fullName}"
-                                    }
-                                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            onDismiss = {
-                                showCardRegisterDialog = false
-                                pendingRegistrationCard = null
-                            }
-                        )
-                    }
-
                     if (showCardInspector) {
                         CardInspectorDialog(
                             inspectedCard = inspectedCardData,
-                            onSimulateLocalCard = {
-                                val fakeUid = "04%08X".format((0x10000000..0x7FFFFFFF).random())
-                                val sampleText = "Name: Faith Nyambura\nReg: C026-01-1142/2023\nDepartment: Department of Computer Science\nCourse: B.Sc. Computer Science"
-                                inspectedCardData = nfcHelper.parseTextIntoCardData(
-                                    cardUid = fakeUid,
-                                    rawText = sampleText,
-                                    techList = listOf("NfcA", "MifareUltralight", "Ndef"),
-                                    memorySource = "Simulated NDEF Payload",
-                                    rawDump = "Card UID: $fakeUid\nTechnologies: NfcA, MifareUltralight, Ndef\n\n$sampleText"
-                                )
-                                nfcHelper.playSuccessFeedback()
-                            },
                             onClear = { inspectedCardData = null },
-                            onSendToRegistration = { parsed ->
-                                showCardInspector = false
-                                pendingRegistrationCard = parsed
-                                showCardRegisterDialog = true
-                            },
                             onDismiss = {
                                 showCardInspector = false
                                 inspectedCardData = null
@@ -373,17 +263,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-        }
-    }
-
-    private fun performDatabaseSync(universityId: String) {
-        if (isSyncing) return
-        isSyncing = true
-        lifecycleScope.launch {
-            val summary = cloudSync.syncRoster(universityId, storage)
-            isSyncing = false
-            refreshTrigger++
-            Toast.makeText(this@MainActivity, summary.message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -444,19 +323,8 @@ class MainActivity : ComponentActivity() {
                 return
             }
 
-            if (showCardRegisterDialog) {
-                nfcHelper.playSuccessFeedback()
-                pendingRegistrationCard = parsedData
-                Toast.makeText(this, "Card captured: ${parsedData.cardUid}", Toast.LENGTH_SHORT).show()
-                return
-            }
-
             processCardData(parsedData)
         }
-    }
-
-    private fun processCardUid(cardUid: String) {
-        processCardData(ParsedCardData(cardUid))
     }
 
     private fun processCardData(cardData: ParsedCardData) {
@@ -523,9 +391,6 @@ class MainActivity : ComponentActivity() {
                         courseCode = cardData.suggestedCourseCode ?: session.courseCode,
                         courseName = cardData.suggestedCourse ?: session.allowedCourses.firstOrNull() ?: "General Programme"
                     )
-                    if (autoRes is AttendanceStorage.RecordResult.Success) {
-                        lifecycleScope.launch { cloudSync.pushStudent(autoRes.student) }
-                    }
                     handleRecordResult(autoRes, cardData, allowAutoEnrollFromCard = false)
                 } else {
                     nfcHelper.playUnrecognizedStudentFeedback()

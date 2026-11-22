@@ -13,18 +13,17 @@ import {
   Lock,
   Nfc,
   Printer,
-  RefreshCw,
-  Search,
   Share2,
   ShieldAlert,
   Smartphone,
-  Touchpad,
   UserPlus,
   X,
 } from 'lucide-react';
 import {
   buildUniversityCrestSvg,
   getUniversityById,
+  inferDepartmentFromCourse,
+  isCourseMatch,
 } from '../data/kenyanUniversities';
 import {
   AttendanceRecord,
@@ -53,14 +52,17 @@ interface LiveScanScreenProps {
   } | null;
   pendingCardToEnroll: ParsedCardData | null;
   webNfcActive: boolean;
-  syncing: boolean;
   onWeekChanged: (week: number) => void;
   onBack: () => void;
   onOpenMatrix: () => void;
-  onSyncRoster: () => void;
   onManualCheckIn: (student: Student) => void;
-  onSimulateScan: () => void;
-  onSimulateUnknownCard: () => void;
+  onFastManualCheckIn: (params: {
+    regNumber: string;
+    fullName: string;
+    courseName: string;
+    department: string;
+    customValues: Record<string, string>;
+  }) => void;
   onEnableWebNfc: () => void;
   onDismissEnrollDialog: () => void;
   onSaveAndEnrollTap: (params: {
@@ -86,19 +88,24 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
   lastScannedResult,
   pendingCardToEnroll,
   webNfcActive,
-  syncing,
   onWeekChanged,
   onBack,
   onOpenMatrix,
-  onSyncRoster,
   onManualCheckIn,
-  onSimulateScan,
-  onSimulateUnknownCard,
+  onFastManualCheckIn,
   onEnableWebNfc,
   onDismissEnrollDialog,
   onSaveAndEnrollTap,
 }) => {
   const [showManualDialog, setShowManualDialog] = useState(false);
+  const [manualTab, setManualTab] = useState<'fast' | 'roster'>('fast');
+  const [fastFullName, setFastFullName] = useState('');
+  const [fastRegNumber, setFastRegNumber] = useState('');
+  const [fastCourseName, setFastCourseName] = useState(
+    session.allowedCourses[0] || 'General Programme'
+  );
+  const [fastCustomValues, setFastCustomValues] = useState<Record<string, string>>({});
+
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
   const [manualQuery, setManualQuery] = useState('');
@@ -124,6 +131,9 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
       s.courseName.toLowerCase().includes(manualQuery.toLowerCase())
   );
 
+  const resolvedFastDept =
+    inferDepartmentFromCourse(fastCourseName) || session.department;
+
   const formatTime = (ts: number) =>
     new Date(ts).toLocaleTimeString([], {
       hour: '2-digit',
@@ -136,11 +146,21 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
     () => getUniversityById(session.universityId),
     [session.universityId]
   );
+  const headerCrestSvg = useMemo(() => buildUniversityCrestSvg(uni, 34), [uni]);
   const uniCrestSvg = useMemo(() => buildUniversityCrestSvg(uni, 54), [uni]);
   const courseSheetGroups = useMemo(
     () => getCourseSheetGroups(session, records),
     [session, records]
   );
+
+  const openManualModal = () => {
+    setFastFullName('');
+    setFastRegNumber('');
+    setFastCourseName(session.allowedCourses[0] || 'General Programme');
+    setFastCustomValues({});
+    setManualTab('fast');
+    setShowManualDialog(true);
+  };
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] pb-12">
@@ -153,6 +173,10 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
+            <div
+              className="shrink-0"
+              dangerouslySetInnerHTML={{ __html: headerCrestSvg }}
+            />
             <div className="min-w-0">
               <h1 className="text-base sm:text-lg font-bold truncate">
                 {session.courseCode}
@@ -164,15 +188,6 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={onSyncRoster}
-              disabled={syncing}
-              title="Update student database"
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-xs sm:text-sm font-semibold text-emerald-800 cursor-pointer disabled:opacity-60"
-            >
-              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Update DB</span>
-            </button>
             {multi && (
               <button
                 onClick={onOpenMatrix}
@@ -207,7 +222,8 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
               </div>
               {session.allowedCourses.length > 1 && (
                 <div className="text-[11px] text-emerald-700 font-medium">
-                  Common unit mode: generates {session.allowedCourses.length} separate course sheets on export/print.
+                  Common class mode: generates {session.allowedCourses.length} separate
+                  course sheets on export/print.
                 </div>
               )}
             </div>
@@ -245,7 +261,7 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
             <div className="flex flex-col items-center text-center pt-1">
               <button
                 type="button"
-                onClick={onSimulateScan}
+                onClick={onEnableWebNfc}
                 className={`relative w-36 h-36 rounded-full flex flex-col items-center justify-center border-4 transition-all cursor-pointer ${
                   isSuccess
                     ? 'bg-emerald-50 border-[#10B981] text-[#10B981]'
@@ -275,12 +291,16 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
                     ? 'DUPLICATE'
                     : isWrongCourse
                     ? 'WRONG CLASS'
-                    : 'READY'}
+                    : webNfcActive
+                    ? 'LISTENING'
+                    : 'TAP TO SCAN'}
                 </span>
               </button>
 
               <p className="text-sm text-slate-600 mt-3 font-medium">
-                Hold student card to phone or tap radar to simulate
+                {webNfcActive
+                  ? 'Hold student card to back of phone'
+                  : 'Tap radar to start Web NFC, or use Fast Manual Check-In'}
               </p>
 
               <div className="mt-2 inline-flex items-center px-3.5 py-1 rounded-full bg-slate-100 text-xs font-bold text-slate-700">
@@ -293,11 +313,11 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
               <div className="rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-900 space-y-1">
                 <div className="font-bold flex items-center gap-1.5 text-red-700">
                   <ShieldAlert className="w-4 h-4 shrink-0" />
-                  <span>Unrecognized for this Class (Wrong Course)</span>
+                  <span>Blocked for this Class (Wrong Course)</span>
                 </div>
                 <p>
                   <strong>{lastScannedResult.wrongCourseStudent.fullName}</strong> (
-                  {lastScannedResult.wrongCourseStudent.regNumber}) is registered under{' '}
+                  {lastScannedResult.wrongCourseStudent.regNumber}) belongs to{' '}
                   <strong>{lastScannedResult.wrongCourseStudent.courseName}</strong>,
                   which is not enrolled in this sheet ({session.allowedCourses.join(', ')}).
                 </p>
@@ -339,45 +359,26 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <button
                 type="button"
-                onClick={() => setShowManualDialog(true)}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer"
+                onClick={openManualModal}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs sm:text-sm font-semibold cursor-pointer"
               >
-                <Search className="w-4 h-4 text-[#0284C7]" />
-                <span>Manual Entry</span>
-              </button>
-              <button
-                type="button"
-                onClick={onSimulateScan}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-[#E0F2FE] hover:bg-sky-200/70 text-xs sm:text-sm font-semibold text-[#0369A1] cursor-pointer"
-              >
-                <Touchpad className="w-4 h-4" />
-                <span>Simulate Tap</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={onSimulateUnknownCard}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-slate-300 hover:bg-slate-50 text-xs font-semibold text-slate-600 cursor-pointer"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Test Unknown Card</span>
+                <UserPlus className="w-4 h-4" />
+                <span>Fast Manual Check-In</span>
               </button>
               <button
                 type="button"
                 onClick={onEnableWebNfc}
-                className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold cursor-pointer ${
+                className={`inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold cursor-pointer ${
                   webNfcActive
                     ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                    : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                    : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                 }`}
               >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span>{webNfcActive ? 'Web NFC Active' : 'Android Web NFC'}</span>
+                <Smartphone className="w-4 h-4" />
+                <span>{webNfcActive ? 'Web NFC Active' : 'Start Web NFC'}</span>
               </button>
             </div>
           </div>
@@ -406,10 +407,10 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
               <div className="py-12 text-center border border-dashed border-slate-200 rounded-xl">
                 <Nfc className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                 <p className="text-sm font-medium text-slate-600">
-                  Waiting for first student card tap...
+                  Waiting for first student card tap or manual entry...
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
-                  Only students enrolled in {session.allowedCourses.join(' or ')} are accepted
+                  Accepting: {session.allowedCourses.join(' or ')}
                 </p>
               </div>
             ) : (
@@ -441,12 +442,12 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
         </section>
       </main>
 
-      {/* Manual Check-In Modal */}
+      {/* Fast Manual Check-In Modal (Pre-filled Department & Course) */}
       {showManualDialog && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-base font-bold">Manual Check-In</h3>
+              <h3 className="text-base font-bold">Fast Manual Check-In</h3>
               <button
                 onClick={() => setShowManualDialog(false)}
                 className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"
@@ -454,58 +455,207 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
             <div className="p-4 space-y-3">
-              <input
-                type="text"
-                value={manualQuery}
-                onChange={(e) => setManualQuery(e.target.value)}
-                placeholder="Search Name, Reg No, or Course..."
-                className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:border-[#0284C7]"
-              />
-              <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                {filteredManualStudents.map((s) => {
-                  const cleanUid = normalizeUid(s.cardUid);
-                  const isPresent =
-                    (cleanUid !== '' && alreadyPresentUids.has(cleanUid)) ||
-                    alreadyPresentRegs.has(s.regNumber.trim().toLowerCase());
-                  return (
-                    <div
-                      key={s.id}
-                      className="py-2.5 flex items-center justify-between gap-3"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-bold text-slate-900 truncate">
-                          {s.fullName}
-                        </div>
-                        <div className="text-xs text-slate-500 truncate">
-                          {s.regNumber} • {s.courseName}
-                        </div>
-                      </div>
-                      {isPresent ? (
-                        <span className="text-xs font-bold text-[#059669]">
-                          Present
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            onManualCheckIn(s);
-                            setShowManualDialog(false);
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold cursor-pointer shrink-0"
-                        >
-                          Mark Present
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+              <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setManualTab('fast')}
+                  className={`py-2 rounded-lg cursor-pointer ${
+                    manualTab === 'fast'
+                      ? 'bg-white shadow-xs text-[#0284C7]'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  Quick Entry (Name &amp; Reg)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setManualTab('roster')}
+                  className={`py-2 rounded-lg cursor-pointer ${
+                    manualTab === 'roster'
+                      ? 'bg-white shadow-xs text-[#0284C7]'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  Saved Roster
+                </button>
               </div>
+
+              {manualTab === 'fast' ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!fastFullName.trim() || !fastRegNumber.trim()) return;
+                    onFastManualCheckIn({
+                      regNumber: fastRegNumber.trim().toUpperCase(),
+                      fullName: fastFullName.trim(),
+                      courseName: fastCourseName,
+                      department: resolvedFastDept,
+                      customValues: fastCustomValues,
+                    });
+                    setShowManualDialog(false);
+                  }}
+                  className="space-y-3"
+                >
+                  <div className="rounded-xl bg-sky-50 border border-sky-200 px-3 py-2.5 text-xs space-y-0.5">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#0369A1]">
+                      Pre-filled from Sheet
+                    </div>
+                    <div className="font-semibold text-slate-900">
+                      {session.universityName}
+                    </div>
+                    <div className="text-slate-700">
+                      Department: <span className="font-medium">{resolvedFastDept}</span>
+                    </div>
+                    {session.allowedCourses.length <= 1 && (
+                      <div className="text-slate-900 font-bold">
+                        Course: {fastCourseName}
+                      </div>
+                    )}
+                  </div>
+
+                  {session.allowedCourses.length > 1 && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">
+                        Course (From Sheet)
+                      </label>
+                      <select
+                        value={fastCourseName}
+                        onChange={(e) => setFastCourseName(e.target.value)}
+                        className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 bg-white"
+                      >
+                        {session.allowedCourses.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
+                      Student Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      value={fastFullName}
+                      onChange={(e) => setFastFullName(e.target.value)}
+                      placeholder="e.g. Joseph Karoki Mwangi"
+                      className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:border-[#0284C7]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
+                      Registration Number *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={fastRegNumber}
+                      onChange={(e) => setFastRegNumber(e.target.value.toUpperCase())}
+                      placeholder="e.g. E021-01-1034/2024"
+                      className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:border-[#0284C7]"
+                    />
+                  </div>
+
+                  {session.customColumns.length > 0 && (
+                    <div className="space-y-2 pt-1 border-t border-slate-100">
+                      {session.customColumns.map((col) => (
+                        <input
+                          key={col}
+                          type="text"
+                          placeholder={col}
+                          value={fastCustomValues[col] || ''}
+                          onChange={(e) =>
+                            setFastCustomValues({
+                              ...fastCustomValues,
+                              [col]: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-1.5 text-sm rounded-lg border border-slate-300"
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowManualDialog(false)}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!fastFullName.trim() || !fastRegNumber.trim()}
+                      className="px-4 py-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] disabled:opacity-40 text-white text-sm font-semibold cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Check className="w-4 h-4" />
+                      Mark Present
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={manualQuery}
+                    onChange={(e) => setManualQuery(e.target.value)}
+                    placeholder="Search Name, Reg No, or Course..."
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 focus:outline-none focus:border-[#0284C7]"
+                  />
+                  <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                    {filteredManualStudents.map((s) => {
+                      const cleanUid = normalizeUid(s.cardUid);
+                      const isPresent =
+                        (cleanUid !== '' && alreadyPresentUids.has(cleanUid)) ||
+                        alreadyPresentRegs.has(s.regNumber.trim().toLowerCase());
+                      return (
+                        <div
+                          key={s.id}
+                          className="py-2.5 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-slate-900 truncate">
+                              {s.fullName}
+                            </div>
+                            <div className="text-xs text-slate-500 truncate">
+                              {s.regNumber} • {s.courseName}
+                            </div>
+                          </div>
+                          {isPresent ? (
+                            <span className="text-xs font-bold text-[#059669]">
+                              Present
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                onManualCheckIn(s);
+                                setShowManualDialog(false);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs font-semibold cursor-pointer shrink-0"
+                            >
+                              Mark Present
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Quick On-Tap Card Enrollment Dialog (pre-filled with session's University, Dept & Course) */}
+      {/* Quick On-Tap Card Enrollment Dialog (for UID-only / locked cards) */}
       {pendingCardToEnroll && (
         <QuickEnrollDialog
           cardData={pendingCardToEnroll}
@@ -541,7 +691,7 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
                 {courseSheetGroups.length} separate sheet
                 {courseSheetGroups.length > 1 ? 's' : ''}
               </strong>{' '}
-              (1 per course) with {session.universityName} logo &amp; header.
+              (1 per course) with {session.universityName} crest &amp; header.
             </p>
 
             <div className="space-y-2">
@@ -551,7 +701,7 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
                   title: `PDF / Print Sheets (${courseSheetGroups.length} Page${
                     courseSheetGroups.length > 1 ? 's' : ''
                   })`,
-                  sub: 'Official A4 sheets with University logo & signature lines',
+                  sub: 'Official A4 sheets with University crest & signature lines',
                   color: '#DC2626',
                   icon: Printer,
                 },
@@ -665,7 +815,7 @@ export const LiveScanScreen: React.FC<LiveScanScreenProps> = ({
                         {session.universityName}
                       </h2>
                       <p className="text-xs font-semibold text-slate-700">
-                        {session.department}
+                        {inferDepartmentFromCourse(group.courseName) || session.department}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5">
                         Course / Programme:{' '}
@@ -783,17 +933,18 @@ const QuickEnrollDialog: React.FC<QuickEnrollDialogProps> = ({
   const [mode, setMode] = useState<'new' | 'link'>('new');
   const [fullName, setFullName] = useState(cardData.suggestedName || '');
   const [regNumber, setRegNumber] = useState(cardData.suggestedRegNumber || '');
-  const [department, setDepartment] = useState(
-    cardData.suggestedDepartment || session.department
-  );
   const matchedSessionCourse = cardData.suggestedCourse
-    ? session.allowedCourses.find(
-        (c) => c.toLowerCase() === cardData.suggestedCourse?.toLowerCase()
+    ? session.allowedCourses.find((c) =>
+        isCourseMatch(c, cardData.suggestedCourse || '')
       )
     : undefined;
   const [courseName, setCourseName] = useState(
-    matchedSessionCourse || session.allowedCourses[0] || 'B.Sc. Computer Science'
+    matchedSessionCourse || session.allowedCourses[0] || 'General Programme'
   );
+  const department =
+    cardData.suggestedDepartment ||
+    inferDepartmentFromCourse(courseName) ||
+    session.department;
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
@@ -817,7 +968,7 @@ const QuickEnrollDialog: React.FC<QuickEnrollDialogProps> = ({
             <Nfc className="w-6 h-6 text-[#0284C7]" />
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                Unrecognized Card Detected!
+                Card UID Not Mapped Yet
               </h3>
               <p className="text-xs font-mono text-[#0284C7]">
                 UID: {cardData.cardUid}
@@ -840,7 +991,7 @@ const QuickEnrollDialog: React.FC<QuickEnrollDialogProps> = ({
               mode === 'new' ? 'bg-white shadow-xs text-[#0284C7]' : 'text-slate-600'
             }`}
           >
-            Register to Class
+            Enter Name &amp; Reg
           </button>
           <button
             type="button"
@@ -856,56 +1007,51 @@ const QuickEnrollDialog: React.FC<QuickEnrollDialogProps> = ({
         {mode === 'new' ? (
           <div className="space-y-3">
             <div className="rounded-lg bg-sky-50 border border-sky-200 px-3 py-2 text-[11px] text-[#0369A1]">
-              Pre-filled for <strong>{session.universityName}</strong> to keep this class course-verified.
+              Pre-filled: <strong>{session.universityName}</strong> • {department}
             </div>
+            {session.allowedCourses.length > 1 ? (
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Course / Programme
+                </label>
+                <select
+                  value={courseName}
+                  onChange={(e) => setCourseName(e.target.value)}
+                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 bg-white"
+                >
+                  {session.allowedCourses.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                Course: {courseName}
+              </div>
+            )}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Department (Before Course)
-              </label>
-              <input
-                type="text"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Course / Programme
-              </label>
-              <select
-                value={courseName}
-                onChange={(e) => setCourseName(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 bg-white"
-              >
-                {session.allowedCourses.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Student Full Name
+                Student Full Name *
               </label>
               <input
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g. Jane Wanjiru"
+                placeholder="e.g. Joseph Karoki Mwangi"
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300"
               />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Registration Number
+                Registration Number *
               </label>
               <input
                 type="text"
                 value={regNumber}
                 onChange={(e) => setRegNumber(e.target.value.toUpperCase())}
-                placeholder="e.g. C026-01-0123/2023"
+                placeholder="e.g. E021-01-1034/2024"
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300"
               />
             </div>

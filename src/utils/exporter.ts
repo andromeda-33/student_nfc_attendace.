@@ -1,6 +1,7 @@
 import {
   buildUniversityCrestSvg,
   getUniversityById,
+  isCourseMatch,
 } from '../data/kenyanUniversities';
 import {
   AttendanceRecord,
@@ -68,20 +69,17 @@ export function getCourseSheetGroups(
   records: AttendanceRecord[]
 ): CourseSheetGroup[] {
   const courseList: string[] = [];
-  const seen = new Set<string>();
 
   for (const c of session.allowedCourses) {
     const trimmed = c.trim();
-    if (trimmed && !seen.has(trimmed.toLowerCase())) {
-      seen.add(trimmed.toLowerCase());
+    if (trimmed && !courseList.some((existing) => isCourseMatch(existing, trimmed))) {
       courseList.push(trimmed);
     }
   }
 
   for (const r of records) {
     const rc = (r.studentCourse || '').trim();
-    if (rc && !seen.has(rc.toLowerCase())) {
-      seen.add(rc.toLowerCase());
+    if (rc && !courseList.some((existing) => isCourseMatch(existing, rc))) {
       courseList.push(rc);
     }
   }
@@ -92,10 +90,8 @@ export function getCourseSheetGroups(
 
   return courseList.map((courseName) => ({
     courseName,
-    records: records.filter(
-      (r) =>
-        (r.studentCourse || '').trim().toLowerCase() ===
-        courseName.trim().toLowerCase()
+    records: records.filter((r) =>
+      isCourseMatch(r.studentCourse || '', courseName)
     ),
   }));
 }

@@ -1,15 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import {
   CalendarDays,
-  Check,
   CheckSquare,
   FileUp,
   History,
+  Minus,
+  Plus,
   PlusCircle,
   SlidersHorizontal,
+  Trash2,
   X,
 } from 'lucide-react';
 import {
+  ALL_KENYAN_DEPARTMENTS,
   buildUniversityCrestSvg,
   DEFAULT_UNIVERSITY_ID,
   getUniversityById,
@@ -27,6 +30,16 @@ interface CreateSessionDialogProps {
   onDismiss: () => void;
   onCreate: (session: AttendanceSession) => void;
   onCustomCourseAdded: (course: CustomCourse) => Promise<void> | void;
+}
+
+interface CourseSlot {
+  department: string;
+  isCustomDept: boolean;
+  customDeptInput: string;
+  courseName: string;
+  showCustomCourseBox: boolean;
+  customCourseCode: string;
+  customCourseName: string;
 }
 
 const TYPE_OPTIONS: {
@@ -77,57 +90,30 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
     SessionType.SEMESTER_WEEKLY
   );
 
-  // University -> Department -> Course(s) hierarchy
   const [universityId, setUniversityId] = useState(DEFAULT_UNIVERSITY_ID);
   const [customUniversityName, setCustomUniversityName] = useState('');
   const selectedUni = useMemo(() => getUniversityById(universityId), [universityId]);
 
-  const departments = useMemo(() => {
-    const base = selectedUni.departments.map((d) => d.name);
-    const extras = customCourses
-      .filter((c) => c.universityId === universityId)
-      .map((c) => c.department);
-    return Array.from(new Set([...base, ...extras]));
-  }, [selectedUni, customCourses, universityId]);
+  const allDepartments = useMemo(() => {
+    return universityId === 'custom'
+      ? ALL_KENYAN_DEPARTMENTS
+      : selectedUni.departments;
+  }, [universityId, selectedUni]);
 
-  const [department, setDepartment] = useState(
-    selectedUni.departments[0]?.name || 'Department of Computer Science'
-  );
-  const [isCustomDept, setIsCustomDept] = useState(false);
-  const [customDeptInput, setCustomDeptInput] = useState('');
-
-  const effectiveDepartment = isCustomDept
-    ? customDeptInput.trim() || 'General Department'
-    : department;
-
-  // Courses under university (showing selected department courses first, plus all uni courses for common units)
-  const allUniCourses = useMemo(() => {
-    const deptMatches =
-      selectedUni.departments.find(
-        (d) => d.name.toLowerCase() === effectiveDepartment.toLowerCase()
-      )?.courses || [];
-    const otherDepts = selectedUni.departments
-      .filter((d) => d.name.toLowerCase() !== effectiveDepartment.toLowerCase())
-      .flatMap((d) => d.courses);
-    const custom = customCourses
-      .filter((c) => c.universityId === universityId)
-      .map((c) => ({ code: c.courseCode, name: c.courseName }));
-
-    const merged = [...deptMatches, ...custom, ...otherDepts];
-    const seen = new Set<string>();
-    return merged.filter((c) => {
-      const k = c.name.toLowerCase();
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  }, [selectedUni, effectiveDepartment, customCourses, universityId]);
-
-  const [allowedCourses, setAllowedCourses] = useState<string[]>([
-    selectedUni.departments[0]?.courses[0]?.name || 'B.Sc. Computer Science',
+  const [courseSlots, setCourseSlots] = useState<CourseSlot[]>(() => [
+    {
+      department:
+        allDepartments[0]?.name || 'Department of Electrical & Electronic Engineering',
+      isCustomDept: false,
+      customDeptInput: '',
+      courseName:
+        allDepartments[0]?.courses[0]?.name ||
+        'Bachelor of Science in Electrical and Electronics Engineering',
+      showCustomCourseBox: false,
+      customCourseCode: '',
+      customCourseName: '',
+    },
   ]);
-  const [newCustomCourseCode, setNewCustomCourseCode] = useState('');
-  const [newCustomCourseName, setNewCustomCourseName] = useState('');
 
   const [title, setTitle] = useState('');
   const [courseCode, setCourseCode] = useState('');
@@ -144,57 +130,126 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
 
   const handleUniversityChange = (newUniId: string) => {
     setUniversityId(newUniId);
-    if (newUniId === 'custom') {
-      setIsCustomDept(true);
-      return;
-    }
-    const uni = getUniversityById(newUniId);
-    const firstDept = uni.departments[0];
-    setIsCustomDept(false);
-    if (firstDept) {
-      setDepartment(firstDept.name);
-      if (firstDept.courses[0]) {
-        setAllowedCourses([firstDept.courses[0].name]);
-      }
-    }
+    const depts =
+      newUniId === 'custom'
+        ? ALL_KENYAN_DEPARTMENTS
+        : getUniversityById(newUniId).departments;
+    const d0 = depts[0];
+    setCourseSlots([
+      {
+        department: d0?.name || 'Department of Computer Science',
+        isCustomDept: false,
+        customDeptInput: '',
+        courseName:
+          d0?.courses[0]?.name || 'Bachelor of Science in Computer Science',
+        showCustomCourseBox: false,
+        customCourseCode: '',
+        customCourseName: '',
+      },
+    ]);
   };
 
-  const handleDepartmentChange = (deptName: string) => {
-    if (deptName === '__CUSTOM__') {
-      setIsCustomDept(true);
-      return;
-    }
-    setIsCustomDept(false);
-    setDepartment(deptName);
-    const deptObj = selectedUni.departments.find((d) => d.name === deptName);
-    if (deptObj?.courses[0]) {
-      setAllowedCourses([deptObj.courses[0].name]);
-    }
-  };
-
-  const toggleCourse = (courseName: string) => {
-    setAllowedCourses((prev) => {
-      if (prev.includes(courseName)) {
-        return prev.length > 1 ? prev.filter((c) => c !== courseName) : prev;
+  const setCourseCount = (targetCount: number) => {
+    const clamped = Math.max(1, Math.min(12, targetCount));
+    setCourseSlots((prev) => {
+      if (clamped === prev.length) return prev;
+      if (clamped < prev.length) return prev.slice(0, clamped);
+      const next = [...prev];
+      while (next.length < clamped) {
+        const last = next[next.length - 1];
+        const deptObj = allDepartments.find(
+          (d) => d.name.toLowerCase() === last.department.toLowerCase()
+        );
+        const unusedCourse =
+          deptObj?.courses.find(
+            (c) =>
+              !next.some(
+                (s) => s.courseName.toLowerCase() === c.name.toLowerCase()
+              )
+          )?.name || last.courseName;
+        next.push({
+          department: last.department,
+          isCustomDept: last.isCustomDept,
+          customDeptInput: last.customDeptInput,
+          courseName: unusedCourse,
+          showCustomCourseBox: false,
+          customCourseCode: '',
+          customCourseName: '',
+        });
       }
-      return [...prev, courseName];
+      return next;
     });
   };
 
-  const handleAddCustomCourse = async () => {
-    if (!newCustomCourseName.trim()) return;
+  const addDifferentDeptSlot = () => {
+    setCourseSlots((prev) => {
+      if (prev.length >= 12) return prev;
+      const used = new Set(prev.map((s) => s.department.toLowerCase()));
+      const nextDept =
+        allDepartments.find((d) => !used.has(d.name.toLowerCase())) ||
+        allDepartments[0];
+      return [
+        ...prev,
+        {
+          department: nextDept.name,
+          isCustomDept: false,
+          customDeptInput: '',
+          courseName:
+            nextDept.courses[0]?.name || 'Bachelor of Science in Computer Science',
+          showCustomCourseBox: false,
+          customCourseCode: '',
+          customCourseName: '',
+        },
+      ];
+    });
+  };
+
+  const updateSlot = (index: number, patch: Partial<CourseSlot>) => {
+    setCourseSlots((prev) =>
+      prev.map((slot, i) => (i === index ? { ...slot, ...patch } : slot))
+    );
+  };
+
+  const getCoursesForDepartment = (deptName: string) => {
+    const presets =
+      allDepartments.find((d) => d.name.toLowerCase() === deptName.toLowerCase())
+        ?.courses || [];
+    const custom = customCourses
+      .filter(
+        (c) =>
+          c.universityId === (universityId === 'custom' ? 'custom' : universityId) &&
+          c.department.toLowerCase() === deptName.toLowerCase()
+      )
+      .map((c) => ({ code: c.courseCode, name: c.courseName }));
+    const merged = [...presets, ...custom];
+    const seen = new Set<string>();
+    return merged.filter((c) => {
+      const k = c.name.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
+
+  const handleSaveCustomCourseForSlot = async (index: number) => {
+    const slot = courseSlots[index];
+    if (!slot || !slot.customCourseName.trim()) return;
+    const deptName = slot.isCustomDept
+      ? slot.customDeptInput.trim() || 'General Department'
+      : slot.department;
     const created = addCustomCourseLocal({
       universityId: universityId === 'custom' ? 'custom' : selectedUni.id,
-      department: effectiveDepartment,
-      courseCode: newCustomCourseCode.trim() || 'CUST',
-      courseName: newCustomCourseName.trim(),
+      department: deptName,
+      courseCode: slot.customCourseCode.trim() || 'CUST',
+      courseName: slot.customCourseName.trim(),
     });
     await onCustomCourseAdded(created);
-    setAllowedCourses((prev) =>
-      prev.includes(created.courseName) ? prev : [...prev, created.courseName]
-    );
-    setNewCustomCourseCode('');
-    setNewCustomCourseName('');
+    updateSlot(index, {
+      courseName: created.courseName,
+      showCustomCourseBox: false,
+      customCourseCode: '',
+      customCourseName: '',
+    });
   };
 
   const handleAddCustomCol = () => {
@@ -231,6 +286,19 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
         ? totalWeeks
         : 1;
 
+    const uniqueDepts = Array.from(
+      new Set(
+        courseSlots.map((s) =>
+          s.isCustomDept
+            ? s.customDeptInput.trim() || 'General Department'
+            : s.department
+        )
+      )
+    );
+    const uniqueCourses = Array.from(
+      new Set(courseSlots.map((s) => s.courseName.trim()).filter(Boolean))
+    );
+
     const newSession: AttendanceSession = {
       id:
         typeof crypto !== 'undefined' && crypto.randomUUID
@@ -240,9 +308,9 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
       courseCode: finalCode,
       universityId: universityId === 'custom' ? 'custom' : selectedUni.id,
       universityName: uniName,
-      department: effectiveDepartment,
+      department: uniqueDepts.join(' / '),
       allowedCourses:
-        allowedCourses.length > 0 ? allowedCourses : ['B.Sc. Computer Science'],
+        uniqueCourses.length > 0 ? uniqueCourses : ['General Programme'],
       sessionType: selectedType,
       totalWeeks: calculatedWeeks,
       venue: venue.trim() || 'Lecture Hall 1',
@@ -255,7 +323,7 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
     onCreate(newSession);
   };
 
-  const uniLogoHtml = buildUniversityCrestSvg(selectedUni, 38);
+  const uniLogoHtml = buildUniversityCrestSvg(selectedUni, 42);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
@@ -271,7 +339,7 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
                 Create &amp; Customize Sheet
               </h2>
               <p className="text-xs text-slate-500">
-                Bind University, Department &amp; Course(s) to prevent wrong-class scans
+                Handles single courses or common units across same/different Kenyan departments
               </p>
             </div>
           </div>
@@ -284,11 +352,11 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-4">
-          {/* University & Department & Courses */}
+          {/* 1. University */}
           <div className="rounded-xl bg-slate-50 border border-slate-200 p-3.5 space-y-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                University (Printed on Sheet Header with Logo)
+                1. University / School (Crest Logo &amp; Sheet Header)
               </label>
               <select
                 value={universityId}
@@ -313,101 +381,240 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
               )}
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Department (Comes before Course)
-              </label>
-              <select
-                value={isCustomDept ? '__CUSTOM__' : department}
-                onChange={(e) => handleDepartmentChange(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 bg-white focus:outline-none focus:border-[#0284C7]"
-              >
-                {departments.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-                <option value="__CUSTOM__">+ Custom Department</option>
-              </select>
-              {isCustomDept && (
-                <input
-                  type="text"
-                  value={customDeptInput}
-                  onChange={(e) => setCustomDeptInput(e.target.value)}
-                  placeholder="Enter Department Name"
-                  className="mt-2 w-full px-3 py-2 text-sm rounded-xl border border-slate-300 bg-white"
-                />
-              )}
+            {/* 2. Ask How Many Different Courses */}
+            <div className="rounded-xl bg-sky-50 border border-sky-200 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-slate-800">
+                    2. How many different courses are in this session?
+                  </div>
+                  <div className="text-[11px] text-slate-600">
+                    Pick 1 for a single class, or 2+ for common units
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={courseSlots.length <= 1}
+                    onClick={() => setCourseCount(courseSlots.length - 1)}
+                    className="w-8 h-8 rounded-lg border border-slate-300 bg-white flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <span className="px-3 py-1 rounded-lg bg-white border border-slate-200 text-xs font-bold text-[#0369A1]">
+                    {courseSlots.length} Course{courseSlots.length > 1 ? 's' : ''}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={courseSlots.length >= 12}
+                    onClick={() => setCourseCount(courseSlots.length + 1)}
+                    className="w-8 h-8 rounded-lg border border-slate-300 bg-white flex items-center justify-center disabled:opacity-40 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-slate-700">
-                  Target Course(s) — Select multiple for Common Units
-                </label>
-                <span className="text-[11px] font-semibold text-[#0284C7]">
-                  {allowedCourses.length} sheet{allowedCourses.length > 1 ? 's' : ''} on print
-                </span>
-              </div>
-              <div className="max-h-36 overflow-y-auto bg-white rounded-xl border border-slate-200 p-2 space-y-1">
-                {allUniCourses.map((c) => {
-                  const checked = allowedCourses.includes(c.name);
-                  return (
-                    <button
-                      key={`${c.code}-${c.name}`}
-                      type="button"
-                      onClick={() => toggleCourse(c.name)}
-                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between gap-2 cursor-pointer ${
-                        checked
-                          ? 'bg-[#E0F2FE] text-[#0369A1] font-semibold'
-                          : 'hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <span className="truncate">
-                        <span className="font-mono text-[11px] opacity-75">
-                          {c.code}
-                        </span>{' '}
-                        • {c.name}
-                      </span>
-                      {checked && <Check className="w-3.5 h-3.5 shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
+            {/* 3. Department + Course per Slot */}
+            <div className="space-y-2.5">
+              {courseSlots.map((slot, index) => {
+                const effectiveSlotDept = slot.isCustomDept
+                  ? slot.customDeptInput.trim() || 'General Department'
+                  : slot.department;
+                const deptCourses = getCoursesForDepartment(effectiveSlotDept);
 
-              <div className="flex gap-1.5 mt-2">
-                <input
-                  type="text"
-                  value={newCustomCourseCode}
-                  onChange={(e) => setNewCustomCourseCode(e.target.value.toUpperCase())}
-                  placeholder="Code"
-                  className="w-24 px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white"
-                />
-                <input
-                  type="text"
-                  value={newCustomCourseName}
-                  onChange={(e) => setNewCustomCourseName(e.target.value)}
-                  placeholder="Add custom course name..."
-                  className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white"
-                />
+                return (
+                  <div
+                    key={index}
+                    className="rounded-xl bg-white border border-slate-200 p-3 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[#0284C7]">
+                        Course #{index + 1}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {index > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const s0 = courseSlots[0];
+                              const s0Courses = getCoursesForDepartment(s0.department);
+                              const nextCourse =
+                                s0Courses.find(
+                                  (c) =>
+                                    c.name.toLowerCase() !==
+                                    s0.courseName.toLowerCase()
+                                )?.name || slot.courseName;
+                              updateSlot(index, {
+                                department: s0.department,
+                                isCustomDept: s0.isCustomDept,
+                                customDeptInput: s0.customDeptInput,
+                                courseName: nextCourse,
+                              });
+                            }}
+                            className="text-[11px] font-semibold text-[#0369A1] hover:underline cursor-pointer"
+                          >
+                            Same Dept as #1
+                          </button>
+                        )}
+                        {index > 0 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCourseSlots((prev) =>
+                                prev.filter((_, idx) => idx !== index)
+                              )
+                            }
+                            className="p-1 text-slate-400 hover:text-red-600 cursor-pointer"
+                            title="Remove course"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                        Department
+                      </label>
+                      <select
+                        value={slot.isCustomDept ? '__CUSTOM__' : slot.department}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '__CUSTOM__') {
+                            updateSlot(index, { isCustomDept: true });
+                          } else {
+                            const found = allDepartments.find((d) => d.name === val);
+                            updateSlot(index, {
+                              isCustomDept: false,
+                              department: val,
+                              courseName:
+                                found?.courses[0]?.name || slot.courseName,
+                            });
+                          }
+                        }}
+                        className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 bg-white"
+                      >
+                        {allDepartments.map((d) => (
+                          <option key={d.name} value={d.name}>
+                            {d.name}
+                          </option>
+                        ))}
+                        <option value="__CUSTOM__">+ Custom Department</option>
+                      </select>
+                      {slot.isCustomDept && (
+                        <input
+                          type="text"
+                          value={slot.customDeptInput}
+                          onChange={(e) =>
+                            updateSlot(index, { customDeptInput: e.target.value })
+                          }
+                          placeholder="Enter Department Name"
+                          className="mt-1.5 w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300"
+                        />
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-semibold text-slate-600">
+                          Course / Programme
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSlot(index, {
+                              showCustomCourseBox: !slot.showCustomCourseBox,
+                            })
+                          }
+                          className="text-[11px] font-semibold text-[#0284C7] hover:underline cursor-pointer"
+                        >
+                          {slot.showCustomCourseBox ? 'Hide' : '+ Custom Course'}
+                        </button>
+                      </div>
+                      <select
+                        value={slot.courseName}
+                        onChange={(e) =>
+                          updateSlot(index, { courseName: e.target.value })
+                        }
+                        className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 bg-white"
+                      >
+                        {deptCourses.map((c) => (
+                          <option key={`${c.code}-${c.name}`} value={c.name}>
+                            {c.code} — {c.name}
+                          </option>
+                        ))}
+                        {deptCourses.every(
+                          (c) =>
+                            c.name.toLowerCase() !== slot.courseName.toLowerCase()
+                        ) && (
+                          <option value={slot.courseName}>
+                            {slot.courseName}
+                          </option>
+                        )}
+                      </select>
+
+                      {slot.showCustomCourseBox && (
+                        <div className="flex gap-1.5 mt-2">
+                          <input
+                            type="text"
+                            value={slot.customCourseCode}
+                            onChange={(e) =>
+                              updateSlot(index, {
+                                customCourseCode: e.target.value.toUpperCase(),
+                              })
+                            }
+                            placeholder="Code"
+                            className="w-20 px-2 py-1.5 text-xs rounded-lg border border-slate-300"
+                          />
+                          <input
+                            type="text"
+                            value={slot.customCourseName}
+                            onChange={(e) =>
+                              updateSlot(index, { customCourseName: e.target.value })
+                            }
+                            placeholder="Bachelor of Science in ..."
+                            className="flex-1 px-2 py-1.5 text-xs rounded-lg border border-slate-300"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleSaveCustomCourseForSlot(index)}
+                            className="px-2.5 py-1.5 rounded-lg bg-[#0284C7] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <PlusCircle className="w-3.5 h-3.5" />
+                            Use
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => void handleAddCustomCourse()}
-                  className="px-2.5 py-1.5 rounded-lg bg-[#0284C7] text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  onClick={() => setCourseCount(courseSlots.length + 1)}
+                  className="px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-[#0369A1] text-xs font-semibold cursor-pointer"
                 >
-                  <PlusCircle className="w-3.5 h-3.5" />
-                  Add
+                  + Add Course (Same Dept)
+                </button>
+                <button
+                  type="button"
+                  onClick={addDifferentDeptSlot}
+                  className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  + Add Course (Different Dept)
                 </button>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1.5">
-                Multi-course common units automatically generate 1 separate attendance sheet per course when printed/exported.
-              </p>
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">
-              Sheet Occasion Type
+              3. Sheet Occasion Type
             </label>
             <div className="space-y-1.5">
               {TYPE_OPTIONS.map((opt) => {
@@ -558,7 +765,7 @@ export const CreateSessionDialog: React.FC<CreateSessionDialogProps> = ({
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Data Structures"
+                placeholder="e.g. Engineering Mathematics III"
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300"
               />
             </div>

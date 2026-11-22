@@ -2,9 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   ArrowLeft,
   CreditCard,
-  Nfc,
   Plus,
-  RefreshCw,
   Search,
   Trash2,
   Upload,
@@ -12,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  ALL_KENYAN_DEPARTMENTS,
   DEFAULT_UNIVERSITY_ID,
   getUniversityById,
   KENYAN_UNIVERSITIES,
@@ -22,10 +21,7 @@ interface StudentRosterScreenProps {
   students: Student[];
   customCourses: CustomCourse[];
   lastScannedUid: string | null;
-  syncing: boolean;
   onBack: () => void;
-  onSyncRoster: () => void;
-  onOpenCardRegistration: () => void;
   onAddStudent: (student: Omit<Student, 'id'>) => void;
   onDeleteStudent: (student: Student) => void;
   onImportCsv: (
@@ -44,10 +40,7 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
   students,
   customCourses,
   lastScannedUid,
-  syncing,
   onBack,
-  onSyncRoster,
-  onOpenCardRegistration,
   onAddStudent,
   onDeleteStudent,
   onImportCsv,
@@ -58,11 +51,22 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
 
   const [universityId, setUniversityId] = useState(DEFAULT_UNIVERSITY_ID);
   const selectedUni = useMemo(() => getUniversityById(universityId), [universityId]);
+  const allDepartments = useMemo(() => {
+    const merged = [...selectedUni.departments, ...ALL_KENYAN_DEPARTMENTS];
+    const seen = new Set<string>();
+    return merged.filter((d) => {
+      const k = d.name.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [selectedUni]);
+
   const [department, setDepartment] = useState(
-    selectedUni.departments[0]?.name || 'Department of Computer Science'
+    allDepartments[0]?.name || 'Department of Computer Science'
   );
   const [courseName, setCourseName] = useState(
-    selectedUni.departments[0]?.courses[0]?.name || 'B.Sc. Computer Science'
+    allDepartments[0]?.courses[0]?.name || 'Bachelor of Science in Computer Science'
   );
 
   const [cardUid, setCardUid] = useState(lastScannedUid || '');
@@ -70,18 +74,18 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
   const [fullName, setFullName] = useState('');
 
   const [csvText, setCsvText] = useState(
-    'C026-01-0101/2024, Jane Wanjiru, Department of Computer Science, B.Sc. Computer Science\nC027-01-0102/2024, Kevin Otieno, Department of Information Technology, B.Sc. Information Technology'
+    'C026-01-0101/2024, Jane Wanjiru, Department of Computer Science, Bachelor of Science in Computer Science\nE021-01-0102/2024, Kevin Otieno, Department of Electrical & Electronic Engineering, Bachelor of Science in Electrical and Electronics Engineering'
   );
   const [toast, setToast] = useState<string | null>(null);
 
   const deptCourses = useMemo(() => {
     const preset =
-      selectedUni.departments.find((d) => d.name === department)?.courses || [];
+      allDepartments.find((d) => d.name === department)?.courses || [];
     const custom = customCourses
       .filter((c) => c.universityId === universityId && c.department === department)
       .map((c) => ({ code: c.courseCode, name: c.courseName }));
     return [...preset, ...custom];
-  }, [selectedUni, department, customCourses, universityId]);
+  }, [allDepartments, department, customCourses, universityId]);
 
   const filtered = students.filter(
     (s) =>
@@ -145,38 +149,23 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
               <ArrowLeft className="w-5 h-5" />
             </button>
             <h1 className="text-base sm:text-lg font-bold truncate">
-              Student Directory &amp; Cards
+              Student Directory
             </h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={onSyncRoster}
-              disabled={syncing}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-xs sm:text-sm font-semibold text-emerald-800 cursor-pointer"
-            >
-              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Update DB</span>
-            </button>
-            <button
-              onClick={onOpenCardRegistration}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#059669] hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold cursor-pointer"
-            >
-              <Nfc className="w-4 h-4" />
-              <span className="hidden sm:inline">Tap &amp; Register</span>
-            </button>
             <button
               onClick={() => setShowImportDialog(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer"
             >
               <Upload className="w-4 h-4 text-[#0284C7]" />
-              <span className="hidden md:inline">CSV</span>
+              <span className="hidden md:inline">Import CSV</span>
             </button>
             <button
               onClick={openAdd}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] text-white text-xs sm:text-sm font-semibold cursor-pointer"
             >
               <UserPlus className="w-4 h-4" />
-              <span className="hidden sm:inline">Add Manual</span>
+              <span>Add Student</span>
             </button>
           </div>
         </div>
@@ -202,7 +191,7 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
 
         <div className="flex items-center justify-between text-xs sm:text-sm">
           <span className="font-bold text-slate-700">
-            Total Enrolled: {students.length} students
+            Total Saved: {students.length} students
           </span>
           {lastScannedUid && (
             <span className="font-mono text-xs text-[#0284C7] bg-sky-50 px-2.5 py-1 rounded-md border border-sky-200">
@@ -239,13 +228,9 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
                   <div className="text-[11px] text-slate-400 truncate">
                     {s.department} • {s.universityName}
                   </div>
-                  {hasCard ? (
+                  {hasCard && (
                     <div className="text-[11px] font-mono text-[#0284C7] mt-0.5">
                       UID: {s.cardUid}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] font-medium text-amber-600 mt-0.5">
-                      No Card Paired
                     </div>
                   )}
                 </div>
@@ -271,7 +256,7 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
           >
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">
-                Register Student Manually
+                Add Student to Directory
               </h3>
               <button
                 type="button"
@@ -317,12 +302,12 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
                 onChange={(e) => {
                   const d = e.target.value;
                   setDepartment(d);
-                  const found = selectedUni.departments.find((x) => x.name === d);
+                  const found = allDepartments.find((x) => x.name === d);
                   if (found?.courses[0]) setCourseName(found.courses[0].name);
                 }}
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300 bg-white"
               >
-                {selectedUni.departments.map((d) => (
+                {allDepartments.map((d) => (
                   <option key={d.name} value={d.name}>
                     {d.name}
                   </option>
@@ -349,13 +334,13 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                NFC Card UID (Hex)
+                NFC Card UID (Hex, optional)
               </label>
               <input
                 type="text"
                 value={cardUid}
                 onChange={(e) => setCardUid(e.target.value.toUpperCase())}
-                placeholder="e.g. 04A23B5C89"
+                placeholder="e.g. 86A098BF"
                 className="w-full px-3 py-2 text-sm font-mono rounded-xl border border-slate-300"
               />
             </div>
@@ -369,7 +354,7 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
                 required
                 value={regNumber}
                 onChange={(e) => setRegNumber(e.target.value.toUpperCase())}
-                placeholder="e.g. C026-01-0123/2023"
+                placeholder="e.g. E021-01-1034/2024"
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300"
               />
             </div>
@@ -383,7 +368,7 @@ export const StudentRosterScreen: React.FC<StudentRosterScreenProps> = ({
                 required
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g. Jane Wanjiru"
+                placeholder="e.g. Joseph Karoki Mwangi"
                 className="w-full px-3 py-2 text-sm rounded-xl border border-slate-300"
               />
             </div>

@@ -50,7 +50,9 @@ object SheetExporter {
             val key = record.studentCourse.trim().ifBlank {
                 session.allowedCourses.firstOrNull() ?: "General Programme"
             }
-            val existingKey = grouped.keys.find { it.equals(key, ignoreCase = true) } ?: key
+            val existingKey = grouped.keys.find {
+                CourseMatcher.isCourseMatch(it, key)
+            } ?: key
             grouped.getOrPut(existingKey) { mutableListOf() }.add(record)
         }
 
@@ -436,9 +438,19 @@ object SheetExporter {
             style = Paint.Style.FILL
             isAntiAlias = true
         }
-        val crestTextPaint = Paint().apply {
+        val crestSecondaryPaint = Paint().apply {
+            color = (0xFF000000L or (uni.secondaryColorHex and 0xFFFFFFL)).toInt()
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        val crestWhitePaint = Paint().apply {
             color = Color.WHITE
-            textSize = if (uni.shortName.length > 4) 7.5f else 9f
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        val crestBannerTextPaint = Paint().apply {
+            color = Color.rgb(15, 23, 42)
+            textSize = if (uni.shortName.length > 4) 6.5f else 7.8f
             isFakeBoldText = true
             textAlign = Paint.Align.CENTER
             isAntiAlias = true
@@ -454,28 +466,63 @@ object SheetExporter {
                 val page = document.startPage(pageInfo)
                 val canvas = page.canvas
 
-                // Draw Vector University Crest Emblem on top-left (x=40..84, y=28..76)
+                // Draw Detailed Vector University Crest Emblem on top-left (center x=62, y=26..78)
                 val shieldPath = Path().apply {
-                    moveTo(62f, 28f)
-                    lineTo(84f, 35f)
+                    moveTo(62f, 26f)
+                    lineTo(84f, 33f)
                     lineTo(84f, 52f)
-                    quadTo(84f, 68f, 62f, 76f)
-                    quadTo(40f, 68f, 40f, 52f)
-                    lineTo(40f, 35f)
+                    quadTo(84f, 67f, 62f, 76f)
+                    quadTo(40f, 67f, 40f, 52f)
+                    lineTo(40f, 33f)
                     close()
                 }
                 canvas.drawPath(shieldPath, crestFillPaint)
                 canvas.drawPath(shieldPath, crestStrokePaint)
 
-                val capPath = Path().apply {
-                    moveTo(52f, 44f)
-                    lineTo(62f, 39f)
-                    lineTo(72f, 44f)
-                    lineTo(62f, 49f)
-                    close()
+                if (uni.id == "dekut") {
+                    // Rising Sun + Twin Mt. Kenya Peaks
+                    canvas.drawCircle(62f, 39f, 4.5f, crestAccentPaint)
+                    val peaksPath = Path().apply {
+                        moveTo(45f, 51f)
+                        lineTo(55f, 39f)
+                        lineTo(61f, 45f)
+                        lineTo(68f, 38f)
+                        lineTo(79f, 51f)
+                        close()
+                    }
+                    canvas.drawPath(peaksPath, crestWhitePaint)
+
+                    // 8-tooth Engineering Cogwheel
+                    canvas.save()
+                    canvas.translate(62f, 55.5f)
+                    for (angle in listOf(0f, 45f, 90f, 135f)) {
+                        canvas.save()
+                        canvas.rotate(angle)
+                        canvas.drawRect(-1.5f, -7.2f, 1.5f, 7.2f, crestAccentPaint)
+                        canvas.restore()
+                    }
+                    canvas.drawCircle(0f, 0f, 5.2f, crestSecondaryPaint)
+                    canvas.drawCircle(0f, 0f, 2.1f, crestWhitePaint)
+                    canvas.restore()
+                } else {
+                    // Open Book + Torch Crest for Other Kenyan Universities
+                    canvas.drawCircle(62f, 36f, 2.5f, crestAccentPaint)
+                    val bookPath = Path().apply {
+                        moveTo(50f, 44f)
+                        quadTo(56f, 41f, 62f, 44f)
+                        quadTo(68f, 41f, 74f, 44f)
+                        lineTo(74f, 53f)
+                        quadTo(68f, 50f, 62f, 53f)
+                        quadTo(56f, 50f, 50f, 53f)
+                        close()
+                    }
+                    canvas.drawPath(bookPath, crestWhitePaint)
+                    canvas.drawLine(62f, 44f, 62f, 53f, crestFillPaint)
                 }
-                canvas.drawPath(capPath, crestAccentPaint)
-                canvas.drawText(uni.shortName.take(6).uppercase(), 62f, 62f, crestTextPaint)
+
+                // Bottom Gold Scroll Banner with University Short Code
+                canvas.drawRect(44f, 63.5f, 80f, 73f, crestAccentPaint)
+                canvas.drawText(uni.shortName.take(6).uppercase(), 62f, 70.8f, crestBannerTextPaint)
 
                 // Draw University Name, Department & Single Course Name
                 val displayUniName = session.universityName.ifBlank { uni.name }

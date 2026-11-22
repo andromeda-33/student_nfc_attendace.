@@ -1,6 +1,7 @@
 package com.tapattend.nfc.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -19,6 +21,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.tapattend.nfc.data.*
+
+private data class CourseSlotState(
+    val department: String,
+    val useCustomDept: Boolean = false,
+    val customDept: String = "",
+    val courseName: String,
+    val showCustomCourseBox: Boolean = false,
+    val customCourseCode: String = "",
+    val customCourseName: String = ""
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,43 +47,49 @@ fun CreateSessionDialog(
     var customUniName by remember { mutableStateOf("") }
     val selectedUni = remember(selectedUniId) { KenyanUniversities.getById(selectedUniId) }
 
-    var selectedDept by remember(selectedUniId) {
-        mutableStateOf(selectedUni.departments.firstOrNull()?.name ?: "Department of Computer Science")
-    }
-    var useCustomDept by remember { mutableStateOf(false) }
-    var customDeptName by remember { mutableStateOf("") }
-
-    val activeDeptName = if (useCustomDept && customDeptName.isNotBlank()) customDeptName.trim() else selectedDept
-
-    val availableCourses = remember(selectedUniId, activeDeptName, customCourses, useCustomUni) {
-        val presets = if (!useCustomUni) {
-            selectedUni.departments.find { it.name.equals(activeDeptName, ignoreCase = true) }?.courses ?: emptyList()
+    val allDepts = remember(selectedUniId, customCourses, useCustomUni) {
+        if (useCustomUni) {
+            KenyanUniversities.allKenyanDepartments
         } else {
-            emptyList()
-        }
-        val customs = customCourses
-            .filter {
-                it.universityId == (if (useCustomUni) "custom" else selectedUniId) &&
-                    it.department.equals(activeDeptName, ignoreCase = true)
-            }
-            .map { PresetCourse(it.courseCode, it.courseName) }
-        (presets + customs).distinctBy { it.name.lowercase() }
-    }
-
-    val selectedCourses = remember { mutableStateListOf<String>() }
-
-    LaunchedEffect(availableCourses) {
-        if (selectedCourses.isEmpty() && availableCourses.isNotEmpty()) {
-            selectedCourses.add(availableCourses.first().name)
+            selectedUni.departments
         }
     }
 
-    var showAddCourseBox by remember { mutableStateOf(false) }
-    var newCourseCode by remember { mutableStateOf("") }
-    var newCourseName by remember { mutableStateOf("") }
+    val firstDeptName = allDepts.firstOrNull()?.name ?: "Department of Computer Science"
+    val firstCourseName = allDepts.firstOrNull()?.courses?.firstOrNull()?.name ?: "Bachelor of Science in Computer Science"
+
+    val courseSlots = remember {
+        mutableStateListOf(
+            CourseSlotState(
+                department = firstDeptName,
+                courseName = firstCourseName
+            )
+        )
+    }
+
+    fun updateSlotCount(newCount: Int) {
+        val clamped = newCount.coerceIn(1, 12)
+        while (courseSlots.size < clamped) {
+            val baseSlot = courseSlots.last()
+            val deptCourses = allDepts.find { it.name.equals(baseSlot.department, ignoreCase = true) }?.courses ?: emptyList()
+            val nextUnused = deptCourses.firstOrNull { c ->
+                courseSlots.none { it.courseName.equals(c.name, ignoreCase = true) }
+            }?.name ?: baseSlot.courseName
+            courseSlots.add(
+                CourseSlotState(
+                    department = baseSlot.department,
+                    useCustomDept = baseSlot.useCustomDept,
+                    customDept = baseSlot.customDept,
+                    courseName = nextUnused
+                )
+            )
+        }
+        while (courseSlots.size > clamped && courseSlots.size > 1) {
+            courseSlots.removeAt(courseSlots.lastIndex)
+        }
+    }
 
     var uniDropdownOpen by remember { mutableStateOf(false) }
-    var deptDropdownOpen by remember { mutableStateOf(false) }
 
     var title by remember { mutableStateOf("") }
     var courseCode by remember { mutableStateOf("") }
@@ -80,7 +98,6 @@ fun CreateSessionDialog(
     var selectedType by remember { mutableStateOf(SessionType.SEMESTER_WEEKLY) }
     var totalWeeks by remember { mutableIntStateOf(14) }
 
-    // Customization state
     var isMultiSessionCustom by remember { mutableStateOf(true) }
     var customColumnInput by remember { mutableStateOf("") }
     val customColumnsList = remember { mutableStateListOf<String>() }
@@ -101,21 +118,41 @@ fun CreateSessionDialog(
                     .padding(18.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    "Create & Customize Sheet",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Bind University, Department & Course(s) to block wrong-class scans",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val primaryColor = Color((0xFF000000L or (selectedUni.primaryColorHex and 0xFFFFFFL)))
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(primaryColor),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            selectedUni.shortName.take(5).uppercase(),
+                            color = Color.White,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            "Create & Customize Sheet",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Select courses & departments for single or common classes",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 1. University Selector (default: DEDAN KIMATHI UNIVERSITY OF TECHNOLOGY)
-                Text("1. University / School Name (shown on Sheet & Logo)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                // 1. University Selector
+                Text("1. University / Institution", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
                 Box {
                     OutlinedTextField(
@@ -141,9 +178,11 @@ fun CreateSessionDialog(
                                 onClick = {
                                     selectedUniId = uni.id
                                     useCustomUni = false
-                                    useCustomDept = false
-                                    selectedDept = uni.departments.firstOrNull()?.name ?: "General Department"
-                                    selectedCourses.clear()
+                                    val newDepts = uni.departments
+                                    val d0 = newDepts.firstOrNull()?.name ?: "Department of Computer Science"
+                                    val c0 = newDepts.firstOrNull()?.courses?.firstOrNull()?.name ?: "Bachelor of Science in Computer Science"
+                                    courseSlots.clear()
+                                    courseSlots.add(CourseSlotState(department = d0, courseName = c0))
                                     uniDropdownOpen = false
                                 }
                             )
@@ -152,8 +191,6 @@ fun CreateSessionDialog(
                             text = { Text("+ Other / Custom University", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
                             onClick = {
                                 useCustomUni = true
-                                useCustomDept = true
-                                selectedCourses.clear()
                                 uniDropdownOpen = false
                             }
                         )
@@ -171,187 +208,338 @@ fun CreateSessionDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // 2. Department Selector (BEFORE Course!)
-                Text("2. Department / School (Select before Course)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(4.dp))
-                if (!useCustomUni) {
-                    Box {
-                        OutlinedTextField(
-                            value = if (useCustomDept) "Other / Custom Department" else selectedDept,
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .clickable { deptDropdownOpen = true }
-                        )
-                        DropdownMenu(
-                            expanded = deptDropdownOpen,
-                            onDismissRequest = { deptDropdownOpen = false }
-                        ) {
-                            selectedUni.departments.forEach { dept ->
-                                DropdownMenuItem(
-                                    text = { Text(dept.name, fontSize = 12.sp) },
-                                    onClick = {
-                                        selectedDept = dept.name
-                                        useCustomDept = false
-                                        selectedCourses.clear()
-                                        deptDropdownOpen = false
-                                    }
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("+ Other / Custom Department", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                                onClick = {
-                                    useCustomDept = true
-                                    selectedCourses.clear()
-                                    deptDropdownOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                if (useCustomDept || useCustomUni) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = customDeptName,
-                        onValueChange = { customDeptName = it },
-                        label = { Text("Department Name") },
-                        placeholder = { Text("e.g. Department of Computer Science") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 3. Allowed Courses (Multi-select for Common Units, 1 Sheet per Course)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("3. Eligible Course(s) (Common Units OK)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    TextButton(
-                        onClick = { showAddCourseBox = !showAddCourseBox },
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
-                    ) {
-                        Text(if (showAddCourseBox) "Hide" else "+ Custom Course", fontSize = 11.sp)
-                    }
-                }
-
-                if (showAddCourseBox) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                OutlinedTextField(
-                                    value = newCourseCode,
-                                    onValueChange = { newCourseCode = it.uppercase() },
-                                    label = { Text("Code", fontSize = 11.sp) },
-                                    placeholder = { Text("C030") },
-                                    modifier = Modifier.weight(0.35f),
-                                    singleLine = true
-                                )
-                                OutlinedTextField(
-                                    value = newCourseName,
-                                    onValueChange = { newCourseName = it },
-                                    label = { Text("Course Name", fontSize = 11.sp) },
-                                    placeholder = { Text("B.Sc. AI & Robotics") },
-                                    modifier = Modifier.weight(0.65f),
-                                    singleLine = true
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Button(
-                                onClick = {
-                                    if (newCourseName.isNotBlank()) {
-                                        val added = CustomCourse(
-                                            universityId = if (useCustomUni) "custom" else selectedUniId,
-                                            department = activeDeptName,
-                                            courseCode = newCourseCode.ifBlank { "CUST" },
-                                            courseName = newCourseName.trim()
-                                        )
-                                        onAddCustomCourse(added)
-                                        if (!selectedCourses.contains(added.courseName)) {
-                                            selectedCourses.add(added.courseName)
-                                        }
-                                        newCourseCode = ""
-                                        newCourseName = ""
-                                        showAddCourseBox = false
-                                    }
-                                },
-                                enabled = newCourseName.isNotBlank(),
-                                modifier = Modifier.align(Alignment.End)
-                            ) {
-                                Text("Add & Select", fontSize = 11.sp)
-                            }
-                        }
-                    }
-                }
-
+                // 2. Ask How Many Different Courses are in this Session
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        if (availableCourses.isEmpty()) {
-                            Text(
-                                "No preset courses in this custom department yet — tap '+ Custom Course' above to add one.",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(4.dp)
-                            )
-                        } else {
-                            availableCourses.forEach { c ->
-                                val isChecked = selectedCourses.any { it.equals(c.name, ignoreCase = true) }
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            if (isChecked) {
-                                                selectedCourses.removeAll { it.equals(c.name, ignoreCase = true) }
-                                            } else {
-                                                selectedCourses.add(c.name)
-                                            }
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "2. How many different courses are in this session?",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Use 1 for a single class, or 2+ for common units (same or different departments)",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { updateSlotCount(courseSlots.size - 1) },
+                                enabled = courseSlots.size > 1,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text("−", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Text(
+                                    "${courseSlots.size} Course${if (courseSlots.size > 1) "s" else ""}",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { updateSlotCount(courseSlots.size + 1) },
+                                enabled = courseSlots.size < 12,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text("+", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 3. Per-Course Department & Course Pickers
+                courseSlots.forEachIndexed { index, slot ->
+                    var deptMenuOpen by remember { mutableStateOf(false) }
+                    var courseMenuOpen by remember { mutableStateOf(false) }
+
+                    val resolvedSlotDept = if (slot.useCustomDept && slot.customDept.isNotBlank()) {
+                        slot.customDept.trim()
+                    } else {
+                        slot.department
+                    }
+
+                    val slotCourses = remember(selectedUniId, resolvedSlotDept, customCourses, useCustomUni) {
+                        val presets = allDepts.find { it.name.equals(resolvedSlotDept, ignoreCase = true) }?.courses ?: emptyList()
+                        val customs = customCourses
+                            .filter {
+                                it.universityId == (if (useCustomUni) "custom" else selectedUniId) &&
+                                    it.department.equals(resolvedSlotDept, ignoreCase = true)
+                            }
+                            .map { PresetCourse(it.courseCode, it.courseName) }
+                        (presets + customs).distinctBy { it.name.lowercase() }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Course #${index + 1}",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (index > 0) {
+                                        TextButton(
+                                            onClick = {
+                                                val s0 = courseSlots[0]
+                                                val s0Courses = allDepts.find { it.name.equals(s0.department, ignoreCase = true) }?.courses ?: emptyList()
+                                                courseSlots[index] = slot.copy(
+                                                    department = s0.department,
+                                                    useCustomDept = s0.useCustomDept,
+                                                    customDept = s0.customDept,
+                                                    courseName = s0Courses.firstOrNull { c ->
+                                                        !c.name.equals(s0.courseName, ignoreCase = true)
+                                                    }?.name ?: slot.courseName
+                                                )
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                        ) {
+                                            Text("Same Dept as #1", fontSize = 10.sp)
                                         }
-                                        .padding(vertical = 2.dp)
+                                        IconButton(
+                                            onClick = { courseSlots.removeAt(index) },
+                                            modifier = Modifier.size(26.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Remove Course",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Department dropdown
+                            Box {
+                                OutlinedTextField(
+                                    value = if (slot.useCustomDept) "Custom Department" else slot.department,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("Department", fontSize = 11.sp) },
+                                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable { deptMenuOpen = true }
+                                )
+                                DropdownMenu(
+                                    expanded = deptMenuOpen,
+                                    onDismissRequest = { deptMenuOpen = false }
                                 ) {
-                                    Checkbox(
-                                        checked = isChecked,
-                                        onCheckedChange = { checked ->
-                                            if (checked && !isChecked) {
-                                                selectedCourses.add(c.name)
-                                            } else if (!checked) {
-                                                selectedCourses.removeAll { it.equals(c.name, ignoreCase = true) }
+                                    allDepts.forEach { d ->
+                                        DropdownMenuItem(
+                                            text = { Text(d.name, fontSize = 12.sp) },
+                                            onClick = {
+                                                courseSlots[index] = slot.copy(
+                                                    department = d.name,
+                                                    useCustomDept = false,
+                                                    courseName = d.courses.firstOrNull()?.name ?: slot.courseName
+                                                )
+                                                deptMenuOpen = false
                                             }
+                                        )
+                                    }
+                                    DropdownMenuItem(
+                                        text = { Text("+ Custom Department", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                        onClick = {
+                                            courseSlots[index] = slot.copy(useCustomDept = true)
+                                            deptMenuOpen = false
                                         }
                                     )
-                                    Column {
-                                        Text(c.name, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                        Text(c.code, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+
+                            if (slot.useCustomDept) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedTextField(
+                                    value = slot.customDept,
+                                    onValueChange = { courseSlots[index] = slot.copy(customDept = it) },
+                                    label = { Text("Enter Department Name", fontSize = 11.sp) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Course dropdown
+                            Box {
+                                OutlinedTextField(
+                                    value = slot.courseName,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("Course / Programme", fontSize = 11.sp) },
+                                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable { courseMenuOpen = true }
+                                )
+                                DropdownMenu(
+                                    expanded = courseMenuOpen,
+                                    onDismissRequest = { courseMenuOpen = false }
+                                ) {
+                                    slotCourses.forEach { c ->
+                                        DropdownMenuItem(
+                                            text = { Text("${c.code} — ${c.name}", fontSize = 12.sp) },
+                                            onClick = {
+                                                courseSlots[index] = slot.copy(courseName = c.name)
+                                                courseMenuOpen = false
+                                            }
+                                        )
                                     }
+                                    DropdownMenuItem(
+                                        text = { Text("+ Add Custom Course", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                        onClick = {
+                                            courseSlots[index] = slot.copy(showCustomCourseBox = true)
+                                            courseMenuOpen = false
+                                        }
+                                    )
+                                }
+                            }
+
+                            TextButton(
+                                onClick = { courseSlots[index] = slot.copy(showCustomCourseBox = !slot.showCustomCourseBox) },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                            ) {
+                                Text(
+                                    if (slot.showCustomCourseBox) "Hide Custom Course" else "+ Course not listed? Add Custom Course",
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            if (slot.showCustomCourseBox) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedTextField(
+                                        value = slot.customCourseCode,
+                                        onValueChange = { courseSlots[index] = slot.copy(customCourseCode = it.uppercase()) },
+                                        label = { Text("Code", fontSize = 10.sp) },
+                                        placeholder = { Text("E021") },
+                                        modifier = Modifier.weight(0.32f),
+                                        singleLine = true
+                                    )
+                                    OutlinedTextField(
+                                        value = slot.customCourseName,
+                                        onValueChange = { courseSlots[index] = slot.copy(customCourseName = it) },
+                                        label = { Text("Course Name", fontSize = 10.sp) },
+                                        placeholder = { Text("Bachelor of Science in ...") },
+                                        modifier = Modifier.weight(0.68f),
+                                        singleLine = true
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Button(
+                                    onClick = {
+                                        if (slot.customCourseName.isNotBlank()) {
+                                            val added = CustomCourse(
+                                                universityId = if (useCustomUni) "custom" else selectedUniId,
+                                                department = resolvedSlotDept,
+                                                courseCode = slot.customCourseCode.ifBlank { "CUST" },
+                                                courseName = slot.customCourseName.trim()
+                                            )
+                                            onAddCustomCourse(added)
+                                            courseSlots[index] = slot.copy(
+                                                courseName = added.courseName,
+                                                showCustomCourseBox = false,
+                                                customCourseCode = "",
+                                                customCourseName = ""
+                                            )
+                                        }
+                                    },
+                                    enabled = slot.customCourseName.isNotBlank()
+                                ) {
+                                    Text("Use Custom Course", fontSize = 11.sp)
                                 }
                             }
                         }
                     }
                 }
 
-                if (selectedCourses.size > 1) {
+                // Quick Common-Unit Add Buttons
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = {
+                            val base = courseSlots.first()
+                            val deptCourses = allDepts.find { it.name.equals(base.department, ignoreCase = true) }?.courses ?: emptyList()
+                            val nextUnused = deptCourses.firstOrNull { c ->
+                                courseSlots.none { it.courseName.equals(c.name, ignoreCase = true) }
+                            }?.name ?: base.courseName
+                            courseSlots.add(
+                                CourseSlotState(
+                                    department = base.department,
+                                    useCustomDept = base.useCustomDept,
+                                    customDept = base.customDept,
+                                    courseName = nextUnused
+                                )
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Text("+ Add (Same Dept)", fontSize = 11.sp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val usedDepts = courseSlots.map { it.department.lowercase() }.toSet()
+                            val nextDept = allDepts.firstOrNull { it.name.lowercase() !in usedDepts } ?: allDepts.first()
+                            courseSlots.add(
+                                CourseSlotState(
+                                    department = nextDept.name,
+                                    courseName = nextDept.courses.firstOrNull()?.name ?: "Bachelor of Science in Computer Science"
+                                )
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Text("+ Add (Other Dept)", fontSize = 11.sp)
+                    }
+                }
+
+                if (courseSlots.size > 1) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -359,7 +547,7 @@ fun CreateSessionDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "Common Unit (${selectedCourses.size} courses): Printing/exporting will automatically split into ${selectedCourses.size} separate sheets (1 per course).",
+                            "Common Class (${courseSlots.size} courses): Exports 1 separate signed sheet per course automatically.",
                             fontSize = 11.sp,
                             color = Color(0xFF0369A1),
                             modifier = Modifier.padding(8.dp)
@@ -370,7 +558,7 @@ fun CreateSessionDialog(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    "Sheet Occasion Type:",
+                    "3. Sheet Occasion Type",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -489,7 +677,7 @@ fun CreateSessionDialog(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Unit / Sheet Title") },
-                    placeholder = { Text("e.g. Data Structures & Algorithms") },
+                    placeholder = { Text("e.g. Engineering Mathematics III") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -529,6 +717,14 @@ fun CreateSessionDialog(
                             val finalCode = courseCode.ifBlank { "CCS 101" }
                             val finalTitle = title.ifBlank { "$finalCode Attendance" }
 
+                            val resolvedDepts = courseSlots.map { s ->
+                                if (s.useCustomDept && s.customDept.isNotBlank()) s.customDept.trim() else s.department
+                            }.distinct()
+
+                            val finalCourses = courseSlots.map { s ->
+                                s.courseName.trim()
+                            }.filter { it.isNotBlank() }.distinct()
+
                             val sessionColNames = if (selectedType == SessionType.CUSTOM_SHEET && isMultiSessionCustom) {
                                 customSessionNamesText.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                             } else if (selectedType == SessionType.SEMESTER_WEEKLY) {
@@ -543,21 +739,13 @@ fun CreateSessionDialog(
                                 else -> 1
                             }
 
-                            val finalCourses = if (selectedCourses.isNotEmpty()) {
-                                selectedCourses.toList()
-                            } else if (availableCourses.isNotEmpty()) {
-                                listOf(availableCourses.first().name)
-                            } else {
-                                listOf("General Programme")
-                            }
-
                             val newSession = AttendanceSession(
                                 title = finalTitle,
                                 courseCode = finalCode,
                                 universityId = finalUniId,
                                 universityName = finalUniName,
-                                department = activeDeptName,
-                                allowedCourses = finalCourses,
+                                department = resolvedDepts.joinToString(" / "),
+                                allowedCourses = finalCourses.ifEmpty { listOf("General Programme") },
                                 sessionType = selectedType,
                                 totalWeeks = calculatedWeeks,
                                 venue = venue,
