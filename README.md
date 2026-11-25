@@ -97,25 +97,6 @@ nfc card reader/
 
 ---
 
-## 5. How to Build the APK
-
-### Method 1: Android Studio (Recommended)
-1. Open Android Studio.
-2. Select **Open** and choose this folder: `c:\Users\nikol\Desktop\nfc card reader`.
-3. Wait for Gradle sync to complete.
-4. Click **Build > Build Bundle(s) / APK(s) > Build APK(s)**.
-5. The generated APK will be in: `app/build/outputs/apk/debug/app-debug.apk`.
-6. Transfer to phone or install via ADB: `adb install app-debug.apk`.
-
-### Method 2: Command Line (Gradle)
-```bash
-./gradlew assembleDebug
-```
-
-### Method 3: Cloud Build via GitHub Actions (Zero Local Setup)
-1. Push this folder to a GitHub repository.
-2. Go to the **Actions** tab on GitHub.
-3. The included workflow `.github/workflows/build-apk.yml` will automatically compile and provide a direct download link for `TapAttend-NFC-debug.apk`.
 
 ---
 
